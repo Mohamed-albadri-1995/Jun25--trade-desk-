@@ -1204,18 +1204,27 @@ function renderFrozenScreenerView() {
       var ctx = r.context || {};
       var keys2 = (r.screenerKeys || []).join(', ') || '—';
       var price = s.price != null ? '$' + s.price.toFixed(2) : '—';
+      var liveRow = registry[ticker + '|' + etDateStr()];
+      var news = (liveRow && liveRow.news) || r.news || null;
+      var newsCell = '—';
+      if (news) {
+        var fh = news.finnhub || [], tv = news.tradingview || [];
+        var first = (fh[0] && (fh[0].headline || fh[0].title)) || (tv[0] && (tv[0].title || tv[0].headline)) || '';
+        newsCell = first ? (first.length > 60 ? first.slice(0, 60) + '…' : first) : (fh.length + tv.length) + ' items';
+      }
       return '<tr class="' + statusCls + '"><td>' + esc(ticker) + '</td>' +
         '<td>' + price + '</td>' +
         '<td class="' + chgCls + '">' + chg + '</td>' +
         '<td>' + esc(keys2) + '</td>' +
         '<td>' + esc(ctx.shortTerm || '—') + '</td>' +
-        '<td>' + esc(ctx.longTerm || '—') + '</td></tr>';
+        '<td>' + esc(ctx.longTerm || '—') + '</td>' +
+        '<td>' + esc(newsCell) + '</td></tr>';
     }).join('');
     el.innerHTML = '<div class="snap-table-wrap">' +
       '<table class="snap-table">' +
-      '<tr><th colspan="6">' + statusIcon + ' ' + keys.length + ' stocks · slot ' + esc(entry.slot || '—') +
+      '<tr><th colspan="7">' + statusIcon + ' ' + keys.length + ' stocks · slot ' + esc(entry.slot || '—') +
         ' · captured ' + esc(entry.capturedAt || '—') + (entry.complete ? '' : ' · ' + esc(entry.reason)) + '</th></tr>' +
-      '<tr><th>Ticker</th><th>Price</th><th>Chg%</th><th>Screeners</th><th>ST Bias</th><th>LT Bias</th></tr>' +
+      '<tr><th>Ticker</th><th>Price</th><th>Chg%</th><th>Screeners</th><th>ST Bias</th><th>LT Bias</th><th>News</th></tr>' +
       rows + '</table></div>';
   });
 }
@@ -1773,6 +1782,32 @@ function renderNewsItems(resp) {
   });
   return html;
 }
+function autoFetchNewsQueue(rows) {
+  var now = Date.now();
+  var toFetch = rows.filter(function (r) {
+    return !r.news || (now - (r.news.fetchedAt || 0)) > 30 * 60 * 1000;
+  });
+  if (!toFetch.length) return;
+  var i = 0;
+  function next() {
+    if (i >= toFetch.length) return;
+    var row = toFetch[i++];
+    fetchNews(row.ticker, (row.stock && row.stock.tvSymbol) || row.tvSymbol || '')
+      .then(function (resp) {
+        row.news = { finnhub: resp.finnhub || [], tradingview: resp.tradingview || [], fetchedAt: Date.now() };
+        saveRegistry();
+        var newsId = 'news-' + String(row.ticker).replace(/[^A-Za-z0-9]/g, '');
+        var host = document.getElementById(newsId);
+        if (host) host.innerHTML = newsHostInner(row.ticker, (row.stock && row.stock.tvSymbol) || row.tvSymbol || '', newsId, row.news);
+        renderRegistryTable();
+        renderFrozenScreenerView();
+      })
+      .catch(function () {})
+      .then(function () { setTimeout(next, 1500); });
+  }
+  setTimeout(next, 2000);
+}
+
 function loadCardNews(ticker, tvSymbol, hostId) {
   var host = document.getElementById(hostId);
   if (!host) return;
@@ -2202,6 +2237,7 @@ async function runAllScreeners() {
     renderRegistryTable();
     $('scrStatus').textContent = shown + ' candidate' + (shown === 1 ? '' : 's') + ' today · ' +
       liveStocks.length + ' live now' + (refreshed ? ' · ' + refreshed + ' earlier refreshed' : '');
+    autoFetchNewsQueue(regTodayRows());
   } catch (e) {
     $('scrStatus').textContent = 'Error: ' + e.message;
   }
@@ -2281,8 +2317,10 @@ var REG_COLUMNS = [
   { label: 'PM/ADR', get: function (r) { return regFix(r.stock.pmAdrRatio); } },
   { label: 'News', get: function (r) {
       if (!r.news) return '';
-      var n = (r.news.finnhub || []).length + (r.news.tradingview || []).length;
-      return n + ' items @ ' + fmtETTime(r.news.fetchedAt) + ' ET';
+      var fh = r.news.finnhub || [], tv = r.news.tradingview || [];
+      var first = (fh[0] && (fh[0].headline || fh[0].title)) || (tv[0] && (tv[0].title || tv[0].headline)) || '';
+      if (!first) return (fh.length + tv.length) + ' items @ ' + fmtETTime(r.news.fetchedAt) + ' ET';
+      return first.length > 60 ? first.slice(0, 60) + '…' : first;
   } }
 ];
 function regSortForTable(a, b) {
@@ -2809,6 +2847,7 @@ document.addEventListener('DOMContentLoaded', function () {
     renderShortlist();
     renderScreenerFromRegistry(); // also calls renderFreezeBtn() internally
     renderRegistryTable();
+    autoFetchNewsQueue(regTodayRows());
   });
 
   // background → popup: snapshot captured automatically or freeze requested
