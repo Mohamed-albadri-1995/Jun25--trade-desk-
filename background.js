@@ -272,7 +272,7 @@ async function bg_fetchCandles(ticker, fromMs, toMs, resolution, polygonKey, fin
 // ══════════════════════════════════════════════════════════════════════
 // AUTO SNAPSHOT — captures market state at 09:30-10:00 ET in auto mode
 // ══════════════════════════════════════════════════════════════════════
-var BG_SNAPSHOT_SLOTS = ['09:30','09:35','09:40','09:45','09:50','09:55','10:00'];
+var BG_SNAPSHOT_SLOTS = ['09:30','09:35','09:40','09:45','09:50','09:55','10:00','12:00','15:45'];
 
 var BG_STOCK_FILTER2 = {
   operator: 'and',
@@ -841,6 +841,7 @@ async function bg_buildAndSaveFrozenScreener(slot) {
 
 // ── Register 3: EOD Outcome ───────────────────────────────────────────────
 
+// Fetch today's 1-minute bars from Yahoo Finance (ET timezone labels).
 async function bg_fetchYahooIntraday(sym) {
   var hosts = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
   var path = '/v8/finance/chart/' + yahooSymbol(sym) + '?range=1d&interval=1m&includePrePost=false';
@@ -866,6 +867,35 @@ async function bg_fetchYahooIntraday(sym) {
   return null;
 }
 
+// Wilder's ATR14 from daily bars (oldest→newest). Caller must exclude today's bar.
+function bg_computeAtr14(bars) {
+  if (!bars || bars.length < 2) return null;
+  var trs = [];
+  for (var i = 1; i < bars.length; i++) {
+    var h = bars[i].high, l = bars[i].low, pc = bars[i - 1].close;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  var period = 14;
+  if (trs.length < period) return null;
+  var atr = 0;
+  for (var j = 0; j < period; j++) atr += trs[j];
+  atr /= period;
+  for (var j = period; j < trs.length; j++) atr = (atr * (period - 1) + trs[j]) / period;
+  return atr;
+}
+
+// Scan a bar array [oldest→newest] for HH and LL within a hhmm window.
+function bg_hhll(bars, fromHhmm, toHhmm) {
+  var hh = -Infinity, ll = Infinity;
+  for (var b = 0; b < bars.length; b++) {
+    var bar = bars[b];
+    if (bar.hhmm < fromHhmm || bar.hhmm > toHhmm) continue;
+    if (bar.high > hh) hh = bar.high;
+    if (bar.low < ll) ll = bar.low;
+  }
+  return { hh: hh === -Infinity ? null : hh, ll: ll === Infinity ? null : ll };
+}
+
 async function bg_runEodOutcome(date) {
   var r = await bg_storageGet(['frozenScreener', 'eodOutcome']);
   var frozen = (r.frozenScreener || {})[date];
@@ -879,41 +909,70 @@ async function bg_runEodOutcome(date) {
   for (var i = 0; i < tickers.length; i++) {
     var ticker = tickers[i];
     var frozenRow = frozen.rows[ticker];
-    var atr = (frozenRow.stock && frozenRow.stock.atr != null) ? +frozenRow.stock.atr : null;
-    if (i > 0) await new Promise(function (res) { setTimeout(res, 600); });
-    var bars = await bg_fetchYahooIntraday(ticker);
-    if (!bars || !bars.length) {
-      store[date].rows[ticker] = { ticker: ticker, atr: atr, status: 'no_data', fetchedAt: Date.now() };
+    var r1Atr = (frozenRow.stock && frozenRow.stock.atr != null) ? +frozenRow.stock.atr : null;
+    if (i > 0) await new Promise(function (resolve) { setTimeout(resolve, 800); });
+
+    // Fetch intraday (1m) and daily history in parallel — daily used for historical ATR
+    var results = await Promise.all([
+      bg_fetchYahooIntraday(ticker),
+      fetchDeskHistory(ticker, '1mo').catch(function () { return null; })
+    ]);
+    var intradayBars = results[0];
+    var dailyResult = results[1];
+
+    // Historical ATR14: exclude today's bar so today's volatility doesn't inflate ATR
+    var histAtr = null;
+    if (dailyResult && dailyResult.bars && dailyResult.bars.length) {
+      var prevBars = dailyResult.bars.filter(function (b) { return b.time < date; });
+      histAtr = bg_computeAtr14(prevBars);
+    }
+    var atr = histAtr != null ? histAtr : r1Atr;
+    var atrSource = histAtr != null ? 'hist14' : (r1Atr != null ? 'r1_fallback' : 'unknown');
+
+    if (!intradayBars || !intradayBars.length) {
+      store[date].rows[ticker] = { ticker: ticker, atr: atr, atrSource: atrSource, status: 'no_data', fetchedAt: Date.now() };
       continue;
     }
-    var entryBar = null;
-    for (var b = 0; b < bars.length; b++) {
-      if (bars[b].hhmm >= '09:40') { entryBar = bars[b]; break; }
+
+    // Data quality: last bar must be >= 15:55 to confirm full session was captured
+    var lastBar = intradayBars[intradayBars.length - 1];
+    var dataComplete = lastBar && lastBar.hhmm >= '15:55';
+    var status = dataComplete ? 'ok' : 'partial_data';
+
+    // Entry at 9:35 — open of the first 1-min bar at or after 09:35
+    var bar35 = null;
+    for (var b = 0; b < intradayBars.length; b++) {
+      if (intradayBars[b].hhmm >= '09:35') { bar35 = intradayBars[b]; break; }
     }
-    if (!entryBar) {
-      store[date].rows[ticker] = { ticker: ticker, atr: atr, status: 'no_940_bar', fetchedAt: Date.now() };
-      continue;
+    // Entry at 9:40 — open of the first 1-min bar at or after 09:40
+    var bar40 = null;
+    for (var b = 0; b < intradayBars.length; b++) {
+      if (intradayBars[b].hhmm >= '09:40') { bar40 = intradayBars[b]; break; }
     }
-    var entryPrice = entryBar.open;
-    var hh = -Infinity, ll = Infinity;
-    for (var b = 0; b < bars.length; b++) {
-      var bar = bars[b];
-      if (bar.hhmm < '09:40' || bar.hhmm > '16:00') continue;
-      if (bar.high > hh) hh = bar.high;
-      if (bar.low < ll) ll = bar.low;
-    }
-    hh = hh === -Infinity ? null : hh;
-    ll = ll === Infinity ? null : ll;
+
+    var e35 = bar35 ? bar35.open : null;
+    var e40 = bar40 ? bar40.open : null;
+
+    var range35 = bg_hhll(intradayBars, '09:35', '16:00');
+    var range40 = bg_hhll(intradayBars, '09:40', '16:00');
+
     store[date].rows[ticker] = {
       ticker: ticker,
-      entry: entryPrice,
-      atr: atr,
-      hh: hh,
-      ll: ll,
-      downR: (atr && ll != null) ? (entryPrice - ll) / atr : null,
-      upR:   (atr && hh != null) ? (hh - entryPrice)  / atr : null,
+      atr: atr, atrSource: atrSource,
+      // 9:35 entry set
+      entry35: e35,
+      hh35: range35.hh, ll35: range35.ll,
+      downR35: (atr && range35.ll != null && e35 != null) ? (e35 - range35.ll) / atr : null,
+      upR35:   (atr && range35.hh != null && e35 != null) ? (range35.hh - e35) / atr : null,
+      // 9:40 entry set
+      entry40: e40,
+      hh40: range40.hh, ll40: range40.ll,
+      downR40: (atr && range40.ll != null && e40 != null) ? (e40 - range40.ll) / atr : null,
+      upR40:   (atr && range40.hh != null && e40 != null) ? (range40.hh - e40) / atr : null,
+      // meta
+      lastBarTime: lastBar ? lastBar.hhmm : null,
       fetchedAt: Date.now(),
-      status: 'ok'
+      status: status
     };
   }
   store[date].complete = true;

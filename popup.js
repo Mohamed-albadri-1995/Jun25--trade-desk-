@@ -939,7 +939,7 @@ async function refreshMarket() {
 // ══════════════════════════════════════════════════════════════════════
 // SNAPSHOT SYSTEM — Register 1: Frozen Screener / Register 2: Market Snapshots
 // ══════════════════════════════════════════════════════════════════════
-var SNAPSHOT_SLOTS = ['09:30','09:35','09:40','09:45','09:50','09:55','10:00'];
+var SNAPSHOT_SLOTS = ['09:30','09:35','09:40','09:45','09:50','09:55','10:00','12:00','15:45'];
 
 // ET time as "HH:MM:SS" string
 function etTimeStr(ms) {
@@ -1280,22 +1280,45 @@ function renderEodOutcomeView() {
     }
     var rows = Object.keys(entry.rows).map(function (t) { return entry.rows[t]; });
     rows.sort(function (a, b) {
-      var ua = a.upR != null ? a.upR : -Infinity, ub = b.upR != null ? b.upR : -Infinity;
+      var ua = a.upR40 != null ? a.upR40 : (a.upR35 != null ? a.upR35 : -Infinity);
+      var ub = b.upR40 != null ? b.upR40 : (b.upR35 != null ? b.upR35 : -Infinity);
       return ub - ua;
     });
+    var f2 = function (v) { return v != null && isFinite(v) ? Number(v).toFixed(2) : '—'; };
+    var grn = function (v) { return v != null && isFinite(v) && v > 1 ? ' style="color:#4ade80"' : ''; };
     var html = '<div class="snap-table-wrap"><table class="reg-table">';
-    html += '<tr><th>Ticker</th><th>Entry @ 9:40</th><th>ATR (R1)</th><th>Day HH</th><th>Day LL</th><th>(Entry-LL)/ATR</th><th>(HH-Entry)/ATR</th><th>Status</th></tr>';
+    html += '<tr>' +
+      '<th>Ticker</th><th>ATR (hist14)</th><th>ATR src</th>' +
+      '<th colspan="5" style="background:#0c2a1f;border-left:2px solid #4ade80">9:35 Entry</th>' +
+      '<th colspan="5" style="background:#0c1f2a;border-left:2px solid #60a5fa">9:40 Entry</th>' +
+      '<th>Last bar</th><th>Status</th>' +
+      '</tr>';
+    html += '<tr>' +
+      '<th></th><th></th><th></th>' +
+      '<th style="border-left:2px solid #4ade80">Entry</th><th>HH</th><th>LL</th><th>DownR</th><th>UpR</th>' +
+      '<th style="border-left:2px solid #60a5fa">Entry</th><th>HH</th><th>LL</th><th>DownR</th><th>UpR</th>' +
+      '<th></th><th></th>' +
+      '</tr>';
     rows.forEach(function (row) {
-      var f2 = function (v) { return v != null && isFinite(v) ? Number(v).toFixed(2) : '—'; };
-      html += '<tr>';
+      var partial = row.status === 'partial_data';
+      html += '<tr' + (partial ? ' style="opacity:0.7"' : '') + '>';
       html += '<td style="color:#4ade80;font-weight:600">' + esc(row.ticker || '') + '</td>';
-      html += '<td>' + f2(row.entry) + '</td>';
       html += '<td>' + f2(row.atr) + '</td>';
-      html += '<td>' + f2(row.hh) + '</td>';
-      html += '<td>' + f2(row.ll) + '</td>';
-      html += '<td>' + f2(row.downR) + '</td>';
-      html += '<td style="' + (row.upR != null && row.upR > 1 ? 'color:#4ade80' : '') + '">' + f2(row.upR) + '</td>';
-      html += '<td style="color:var(--muted)">' + esc(row.status || '') + '</td>';
+      html += '<td style="color:var(--muted);font-size:10px">' + esc(row.atrSource || '') + '</td>';
+      // 9:35 set
+      html += '<td style="border-left:2px solid #4ade80">' + f2(row.entry35) + '</td>';
+      html += '<td>' + f2(row.hh35) + '</td>';
+      html += '<td>' + f2(row.ll35) + '</td>';
+      html += '<td>' + f2(row.downR35) + '</td>';
+      html += '<td' + grn(row.upR35) + '>' + f2(row.upR35) + '</td>';
+      // 9:40 set
+      html += '<td style="border-left:2px solid #60a5fa">' + f2(row.entry40) + '</td>';
+      html += '<td>' + f2(row.hh40) + '</td>';
+      html += '<td>' + f2(row.ll40) + '</td>';
+      html += '<td>' + f2(row.downR40) + '</td>';
+      html += '<td' + grn(row.upR40) + '>' + f2(row.upR40) + '</td>';
+      html += '<td style="color:var(--muted)">' + esc(row.lastBarTime || '') + '</td>';
+      html += '<td style="color:' + (partial ? '#f59e0b' : 'var(--muted)') + '">' + esc(row.status || '') + '</td>';
       html += '</tr>';
     });
     html += '</table></div>';
@@ -1746,21 +1769,29 @@ function importEodOutcomeJson(file) {
   reader.readAsText(file);
 }
 
-var EOD_CSV_HEADERS = ['date','ticker','entry','atr','hh','ll','down_r','up_r','status','fetched_at'];
+var EOD_CSV_HEADERS = [
+  'date','ticker','atr','atr_source',
+  'entry35','hh35','ll35','down_r35','up_r35',
+  'entry40','hh40','ll40','down_r40','up_r40',
+  'last_bar','status','fetched_at'
+];
 function exportEodOutcomeCsv() {
   var date = etDateStr();
   storageGet(['eodOutcome']).then(function (r) {
     var entry = (r.eodOutcome || {})[date];
     if (!entry || !entry.rows || !Object.keys(entry.rows).length)
       { setIoStatus('reg3IoStatus', '⚠ No EOD data for today'); return; }
+    var n = function (v) { return v != null && isFinite(v) ? Number(v).toFixed(4) : ''; };
     var rows = Object.keys(entry.rows).map(function (t) {
       var row = entry.rows[t];
-      var n = function (v) { return v != null && isFinite(v) ? Number(v).toFixed(4) : ''; };
       return {
         date: date, ticker: t,
-        entry: n(row.entry), atr: n(row.atr),
-        hh: n(row.hh), ll: n(row.ll),
-        down_r: n(row.downR), up_r: n(row.upR),
+        atr: n(row.atr), atr_source: row.atrSource || '',
+        entry35: n(row.entry35), hh35: n(row.hh35), ll35: n(row.ll35),
+        down_r35: n(row.downR35), up_r35: n(row.upR35),
+        entry40: n(row.entry40), hh40: n(row.hh40), ll40: n(row.ll40),
+        down_r40: n(row.downR40), up_r40: n(row.upR40),
+        last_bar: row.lastBarTime || '',
         status: row.status || '',
         fetched_at: row.fetchedAt ? fmtETTime(row.fetchedAt) : ''
       };
@@ -1782,9 +1813,13 @@ function importEodOutcomeCsv(file) {
       rows.forEach(function (row) {
         if (!row.ticker) return;
         resultRows[row.ticker] = {
-          ticker: row.ticker, entry: pf(row.entry), atr: pf(row.atr),
-          hh: pf(row.hh), ll: pf(row.ll),
-          downR: pf(row.down_r), upR: pf(row.up_r),
+          ticker: row.ticker,
+          atr: pf(row.atr), atrSource: row.atr_source || 'imported',
+          entry35: pf(row.entry35), hh35: pf(row.hh35), ll35: pf(row.ll35),
+          downR35: pf(row.down_r35), upR35: pf(row.up_r35),
+          entry40: pf(row.entry40), hh40: pf(row.hh40), ll40: pf(row.ll40),
+          downR40: pf(row.down_r40), upR40: pf(row.up_r40),
+          lastBarTime: row.last_bar || null,
           status: row.status || 'imported', fetchedAt: Date.now()
         };
       });
@@ -1822,7 +1857,14 @@ function initRegisterIO() {
   var runBtn = $('reg3RunEod');
   if (runBtn) {
     runBtn.addEventListener('click', function () {
-      setIoStatus('reg3IoStatus', '⏳ Fetching intraday data for all Register 1 stocks…');
+      // Warn if market is still open — intraday data will be incomplete
+      var etParts = etTimeStr().split(':');
+      var etMinutes = parseInt(etParts[0]) * 60 + parseInt(etParts[1]);
+      if (etMinutes < 16 * 60) {
+        var etHHMM = etParts[0] + ':' + etParts[1];
+        if (!window.confirm('Market is still open (' + etHHMM + ' ET). HH/LL will be incomplete. Fetch anyway?')) return;
+      }
+      setIoStatus('reg3IoStatus', '⏳ Fetching intraday + daily data for all Register 1 stocks…');
       chrome.runtime.sendMessage({ action: 'runEodOutcome', date: etDateStr() }, function (resp) {
         if (chrome.runtime.lastError) setIoStatus('reg3IoStatus', '⚠ ' + chrome.runtime.lastError.message);
         else if (resp && !resp.ok) setIoStatus('reg3IoStatus', '⚠ ' + (resp.error || 'Unknown error'));
