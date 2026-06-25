@@ -657,12 +657,277 @@ async function testNewFields() {
     'NF: buildCard output unchanged when marketCtx changes but row.context is frozen');
 }
 
+// ─── helpers for snapshot tests ──────────────────────────────────────────────
+function makeIx({ spyChange = 1.2, spyWeekChg = 2.1, qqChange = 0.9, qqWeekChg = 1.8,
+  iwmChange = 0.5, vixChange = -1.5, spySma5 = 540, spySma20 = 535, spySma50 = 530,
+  spySma200 = 510, spyClose = 545 } = {}) {
+  return {
+    SPY: { close: spyClose, change: spyChange, weekChg: spyWeekChg,
+      sma5: spySma5, sma20: spySma20, sma50: spySma50, sma200: spySma200,
+      bbUpper: 550, bbLower: 520, closeH: spyClose, sma5H: spySma5, sma20H: spySma20,
+      bbUpperH: 552, bbLowerH: 518 },
+    QQQ: { close: 460, change: qqChange, weekChg: qqWeekChg,
+      sma5: 458, sma20: 455, sma50: 450, sma200: 430,
+      bbUpper: 465, bbLower: 445, closeH: 460, sma5H: 458, sma20H: 455,
+      bbUpperH: 466, bbLowerH: 444 },
+    IWM: { close: 200, change: iwmChange, weekChg: 1.0, sma5: 198, sma20: 196, sma200: 185 },
+    DIA: { close: 395, change: 0.8, weekChg: 1.2 },
+    VIX: { close: 14, change: vixChange }
+  };
+}
+function makeEtf() {
+  var names = ['Technology','Finance','Energy Minerals','Health Technology','Producer Manufacturing',
+    'Communications','Consumer Durables','Consumer Non-Durables','Non-Energy Minerals',
+    'Finance/Real Estate','Utilities','Electronic Technology','Health Services','Retail Trade','Transportation'];
+  var out = {};
+  names.forEach(function (n, i) {
+    out[n] = { etf: 'ETF' + i, close: 100 + i, change: 0.5 + i * 0.1, weekChg: 1.0 + i * 0.05,
+      vwap: 99 + i, adx: 22, rvol: 1.3 };
+  });
+  return out;
+}
+
+// ── Snapshot suite S1: computeMarketBiasDetail ──────────────────────────────
+async function testS1_ComputeMarketBiasDetail() {
+  section('S1 — computeMarketBiasDetail');
+  const fn = sandbox.computeMarketBiasDetail;
+
+  // BULLISH: SPY+1.2%, QQQ+0.9%, IWM+0.5% → 3 pts, VIX-1.5% → 0, SPY week+2.1%→1, QQQ week+1.8%→1 = score 5
+  const bull = fn(makeIx());
+  eq(bull.result, 'BULLISH', 'S1: BULLISH result when score >= 3');
+  ok(bull.score >= 3, 'S1: score >= 3 for BULLISH');
+  eq(bull.signals.length, 6, 'S1: always produces 6 signals');
+
+  // BEARISH: all negative
+  const bearIx = makeIx({ spyChange: -1.5, qqChange: -1.2, iwmChange: -0.8, vixChange: 4.0, spyWeekChg: -2.0, qqWeekChg: -1.5 });
+  const bear = fn(bearIx);
+  eq(bear.result, 'BEARISH', 'S1: BEARISH result when score <= -3');
+  ok(bear.score <= -3, 'S1: score <= -3 for BEARISH');
+
+  // NEUTRAL: mixed
+  const neuIx = makeIx({ spyChange: 0.1, qqChange: -0.1, iwmChange: 0.0, vixChange: 0.5, spyWeekChg: 0.5, qqWeekChg: 0.5 });
+  const neu = fn(neuIx);
+  eq(neu.result, 'NEUTRAL', 'S1: NEUTRAL when no threshold reached');
+
+  // signals array shape
+  const sigs = bull.signals;
+  ok(sigs.every(function (s) { return 'label' in s && 'pts' in s && 'state' in s; }), 'S1: each signal has label, pts, state');
+  ok(sigs.filter(function (s) { return s.pts !== 0; }).length > 0, 'S1: at least one signal has pts != 0');
+
+  // null VIX pushes unknown signal
+  const noVixIx = makeIx();
+  noVixIx.VIX = { close: 14, change: null };
+  const noVix = fn(noVixIx);
+  const vixSig = noVix.signals.find(function (s) { return s.label.indexOf('VIX') !== -1; });
+  ok(vixSig && vixSig.state === 'unknown', 'S1: VIX null → unknown state');
+  eq(vixSig.pts, 0, 'S1: VIX null → 0 pts');
+}
+
+// ── Snapshot suite S2: buildMarketSnapshot ───────────────────────────────────
+async function testS2_BuildMarketSnapshot() {
+  section('S2 — buildMarketSnapshot');
+  const snap = sandbox.buildMarketSnapshot(makeIx(), makeEtf(), [{ ticker: 'NVDA' }]);
+
+  ok(snap.indices && snap.indices.SPY, 'S2: indices.SPY present');
+  ok(snap.indices.QQQ != null, 'S2: indices.QQQ present');
+  ok(snap.indices.VIX != null, 'S2: indices.VIX present');
+  ok(snap.shortTerm && snap.shortTerm.result, 'S2: shortTerm.result present');
+  eq(snap.shortTerm.signals.length, 6, 'S2: shortTerm.signals has 6 entries');
+  ok(snap.midTerm && snap.midTerm.result, 'S2: midTerm.result present');
+  eq(snap.midTerm.signals.length, 6, 'S2: midTerm.signals has 6 entries');
+  ok(snap.longTerm && snap.longTerm.result, 'S2: longTerm.result present');
+  ok(snap.regime && snap.regime.slug, 'S2: regime.slug present');
+  ok(snap.sectors && Object.keys(snap.sectors).length >= 10, 'S2: >= 10 sectors');
+  ok(Array.isArray(snap.breakoutNames), 'S2: breakoutNames is array');
+  ok(snap.breakoutNames.includes('NVDA'), 'S2: breakoutNames contains hot stock');
+
+  // indices only copy specific fields — no raw sma arrays etc.
+  ok(!('bars' in (snap.indices.SPY || {})), 'S2: raw bars not copied into indices');
+}
+
+// ── Snapshot suite S3: checkMarketSnapshotComplete ───────────────────────────
+async function testS3_CheckMarketSnapshotComplete() {
+  section('S3 — checkMarketSnapshotComplete');
+  const fn = sandbox.checkMarketSnapshotComplete;
+  const goodSnap = sandbox.buildMarketSnapshot(makeIx(), makeEtf(), []);
+
+  const pass1 = fn(goodSnap);
+  ok(pass1.ok, 'S3: complete snap passes check');
+  eq(pass1.reason, '', 'S3: reason empty on pass');
+
+  eq(fn(null).ok, false, 'S3: null snap fails');
+  eq(fn(undefined).ok, false, 'S3: undefined snap fails');
+
+  const noSPY = JSON.parse(JSON.stringify(goodSnap));
+  noSPY.indices.SPY.close = null;
+  ok(!fn(noSPY).ok, 'S3: fails when SPY.close is null');
+
+  const noQQQ = JSON.parse(JSON.stringify(goodSnap));
+  delete noQQQ.indices.QQQ;
+  ok(!fn(noQQQ).ok, 'S3: fails when QQQ missing');
+
+  const noVIX = JSON.parse(JSON.stringify(goodSnap));
+  noVIX.indices.VIX.change = null;
+  ok(!fn(noVIX).ok, 'S3: fails when VIX.change is null');
+
+  const badST = JSON.parse(JSON.stringify(goodSnap));
+  badST.shortTerm.signals = badST.shortTerm.signals.slice(0, 4);
+  ok(!fn(badST).ok, 'S3: fails when shortTerm has fewer than 6 signals');
+
+  const badMT = JSON.parse(JSON.stringify(goodSnap));
+  badMT.midTerm.src = '';
+  ok(!fn(badMT).ok, 'S3: fails when midTerm.src is empty');
+
+  const noLT = JSON.parse(JSON.stringify(goodSnap));
+  noLT.longTerm.dist = null;
+  ok(!fn(noLT).ok, 'S3: fails when longTerm.dist is null (200DMA unavailable)');
+
+  const fewSectors = JSON.parse(JSON.stringify(goodSnap));
+  const skeys = Object.keys(fewSectors.sectors);
+  skeys.slice(0, skeys.length - 7).forEach(function (k) { delete fewSectors.sectors[k]; });
+  ok(!fn(fewSectors).ok, 'S3: fails when fewer than 10 sectors');
+}
+
+// ── Snapshot suite S4: saveMarketSnapshot ───────────────────────────────────
+async function testS4_SaveMarketSnapshot() {
+  section('S4 — saveMarketSnapshot');
+  _store = {};
+  const snap = sandbox.buildMarketSnapshot(makeIx(), makeEtf(), []);
+  const date = '2026-06-25';
+
+  const r1 = await sandbox.saveMarketSnapshot(date, '09:30', '09:30:05', snap, true, '');
+  ok(r1.saved, 'S4: first save succeeds');
+
+  const r2 = await sandbox.saveMarketSnapshot(date, '09:30', '09:30:45', snap, true, '');
+  ok(!r2.saved, 'S4: second save blocked — slot already locked (complete:true)');
+  ok(r2.reason.indexOf('locked') !== -1, 'S4: reason mentions locked');
+
+  // incomplete slot can be retried
+  const r3 = await sandbox.saveMarketSnapshot(date, '09:35', '09:35:02', snap, false, 'VIX missing');
+  ok(r3.saved, 'S4: incomplete slot saves ok');
+  const r4 = await sandbox.saveMarketSnapshot(date, '09:35', '09:35:55', snap, true, '');
+  ok(r4.saved, 'S4: retry on incomplete slot succeeds');
+  const r5 = await sandbox.saveMarketSnapshot(date, '09:35', '09:36:00', snap, true, '');
+  ok(!r5.saved, 'S4: now complete, further retries blocked');
+}
+
+// ── Snapshot suite S5: buildFrozenScreenerEntry ──────────────────────────────
+async function testS5_BuildFrozenScreenerEntry() {
+  section('S5 — buildFrozenScreenerEntry');
+  reset();
+  setMarket({ marketBias: 'BULLISH', marketLongTerm: 'BULLISH', marketStage: 'UPTREND',
+    lastRefresh: Date.now() - 5 * 60 * 1000 });
+
+  const spy = makeStock('SPY2', { close: 545 });
+  sandbox.registryUpsertLive([spy], { SPY2: ['trend'] });
+
+  const entry = sandbox.buildFrozenScreenerEntry('09:35', '09:35:08');
+  ok(entry.rows && Object.keys(entry.rows).length > 0, 'S5: rows populated from registry');
+  ok(entry.slot === '09:35', 'S5: slot stamped correctly');
+  ok(entry.capturedAt === '09:35:08', 'S5: capturedAt stamped');
+  ok(entry.ts > 0, 'S5: ts set');
+  ok(entry._ctxTime > 0, 'S5: _ctxTime stamped from marketCtx.lastRefresh');
+
+  const row = entry.rows['SPY2'];
+  ok(row != null, 'S5: SPY2 row present in frozen entry');
+  ok(row._stockTime != null, 'S5: _stockTime stamped per row');
+  ok(row._contextTime != null, 'S5: _contextTime stamped per row');
+
+  // yesterday rows excluded
+  const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  Object.keys(sandbox.registry).forEach(function (k) { sandbox.registry[k].date = yesterday; });
+  const emptyEntry = sandbox.buildFrozenScreenerEntry('09:35', '09:35:10');
+  eq(Object.keys(emptyEntry.rows).length, 0, 'S5: yesterday rows excluded from freeze');
+}
+
+// ── Snapshot suite S6: checkFrozenScreenerComplete ───────────────────────────
+async function testS6_CheckFrozenScreenerComplete() {
+  section('S6 — checkFrozenScreenerComplete');
+  reset();
+  setMarket({ marketBias: 'BULLISH', marketLongTerm: 'BULLISH', marketStage: 'UPTREND',
+    lastRefresh: Date.now() - 5 * 60 * 1000 });
+  const spy = makeStock('SPY3', { close: 545 });
+  sandbox.registryUpsertLive([spy], { SPY3: ['trend'] });
+  const goodEntry = sandbox.buildFrozenScreenerEntry('09:35', '09:35:08');
+  const fn = sandbox.checkFrozenScreenerComplete;
+
+  const r1 = fn(goodEntry);
+  ok(r1.ok, 'S6: good entry passes');
+  eq(r1.reason, '', 'S6: reason empty on pass');
+
+  ok(!fn(null).ok, 'S6: null entry fails');
+  ok(!fn({ rows: {} }).ok, 'S6: empty rows fails');
+
+  const noPrice = JSON.parse(JSON.stringify(goodEntry));
+  noPrice.rows['SPY3'].stock.price = null;
+  ok(!fn(noPrice).ok, 'S6: fails when stock.price is null (ghost row)');
+
+  const noCtx = JSON.parse(JSON.stringify(goodEntry));
+  noCtx.rows['SPY3'].context = { longTerm: 'UNKNOWN' };
+  ok(!fn(noCtx).ok, 'S6: fails when context.longTerm is UNKNOWN');
+
+  const staleRow = JSON.parse(JSON.stringify(goodEntry));
+  staleRow.rows['SPY3'].lastUpdated = Date.now() - 12 * 60 * 1000;
+  ok(!fn(staleRow).ok, 'S6: fails when stock data > 10 min stale');
+
+  const staleCtx = JSON.parse(JSON.stringify(goodEntry));
+  staleCtx._ctxTime = Date.now() - 35 * 60 * 1000;
+  ok(!fn(staleCtx).ok, 'S6: fails when market context > 30 min stale');
+}
+
+// ── Snapshot suite S7: saveFrozenScreener ────────────────────────────────────
+async function testS7_SaveFrozenScreener() {
+  section('S7 — saveFrozenScreener');
+  _store = {};
+  reset();
+  setMarket({ marketBias: 'BULLISH', marketLongTerm: 'BULLISH', marketStage: 'UPTREND', lastRefresh: Date.now() });
+  const spy = makeStock('SPYA', { close: 545 });
+  sandbox.registryUpsertLive([spy], { SPYA: ['trend'] });
+  const entry = sandbox.buildFrozenScreenerEntry('09:35', '09:35:05');
+  const date = '2026-06-25';
+
+  const r1 = await sandbox.saveFrozenScreener(date, entry, true, '');
+  ok(r1.saved, 'S7: first save succeeds');
+  const r2 = await sandbox.saveFrozenScreener(date, entry, true, '');
+  ok(!r2.saved, 'S7: second save blocked — entry already locked');
+  ok(r2.reason.indexOf('locked') !== -1, 'S7: reason mentions locked');
+
+  // incomplete save is retryable
+  _store = {};
+  const r3 = await sandbox.saveFrozenScreener(date, entry, false, 'VIX missing');
+  ok(r3.saved, 'S7: incomplete save succeeds');
+  const r4 = await sandbox.saveFrozenScreener(date, entry, true, '');
+  ok(r4.saved, 'S7: retry over incomplete entry succeeds');
+  const r5 = await sandbox.saveFrozenScreener(date, entry, true, '');
+  ok(!r5.saved, 'S7: now locked, further saves blocked');
+}
+
+// ── Snapshot suite S8: screenerRanToday ─────────────────────────────────────
+async function testS8_ScreenerRanToday() {
+  section('S8 — screenerRanToday');
+  reset();
+
+  eq(sandbox.screenerRanToday(), false, 'S8: false when registry is empty');
+
+  const spy = makeStock('SPYB', { close: 545 });
+  sandbox.registryUpsertLive([spy], { SPYB: ['trend'] });
+  ok(sandbox.screenerRanToday(), 'S8: true after registryUpsertLive adds today row');
+
+  // set all rows to yesterday
+  const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  Object.keys(sandbox.registry).forEach(function (k) { sandbox.registry[k].date = yesterday; });
+  eq(sandbox.screenerRanToday(), false, 'S8: false when all rows are from yesterday');
+}
+
 // ─── main ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('Trade Desk — Registry-First Architecture Test Harness');
   console.log('popup.js: ' + _pass + ' symbols loaded\n');
 
-  const suites = [testC1, testC2, testC3, testC4, testP1, testP2, testP3, testP4, testNewFields];
+  const suites = [testC1, testC2, testC3, testC4, testP1, testP2, testP3, testP4, testNewFields,
+    testS1_ComputeMarketBiasDetail, testS2_BuildMarketSnapshot, testS3_CheckMarketSnapshotComplete,
+    testS4_SaveMarketSnapshot, testS5_BuildFrozenScreenerEntry, testS6_CheckFrozenScreenerComplete,
+    testS7_SaveFrozenScreener, testS8_ScreenerRanToday];
   for (const suite of suites) {
     try { await suite(); }
     catch (e) {

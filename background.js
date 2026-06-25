@@ -270,6 +270,396 @@ async function bg_fetchCandles(ticker, fromMs, toMs, resolution, polygonKey, fin
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// AUTO SNAPSHOT — captures market state at 09:30-10:00 ET in auto mode
+// ══════════════════════════════════════════════════════════════════════
+var BG_SNAPSHOT_SLOTS = ['09:30','09:35','09:40','09:45','09:50','09:55','10:00'];
+
+var BG_STOCK_FILTER2 = {
+  operator: 'and',
+  operands: [
+    { operation: { operator: 'or', operands: [
+      { operation: { operator: 'and', operands: [
+        { expression: { left: 'type', operation: 'equal', right: 'stock' } },
+        { expression: { left: 'typespecs', operation: 'has', right: ['common'] } } ] } },
+      { operation: { operator: 'and', operands: [
+        { expression: { left: 'type', operation: 'equal', right: 'stock' } },
+        { expression: { left: 'typespecs', operation: 'has', right: ['preferred'] } } ] } },
+      { operation: { operator: 'and', operands: [
+        { expression: { left: 'type', operation: 'equal', right: 'dr' } } ] } },
+      { operation: { operator: 'and', operands: [
+        { expression: { left: 'type', operation: 'equal', right: 'fund' } },
+        { expression: { left: 'typespecs', operation: 'has_none_of', right: ['etf', 'mutual', 'closedend'] } } ] } }
+    ] } },
+    { expression: { left: 'typespecs', operation: 'has_none_of', right: ['pre-ipo'] } }
+  ]
+};
+
+var BG_MARKET_TICKERS = ['AMEX:SPY','NASDAQ:QQQ','AMEX:DIA','AMEX:IWM','TVC:VIX'];
+var BG_SECTOR_ETF_MAP = {
+  'Technology':'AMEX:XLK','Finance':'AMEX:XLF','Energy Minerals':'AMEX:XLE',
+  'Health Technology':'AMEX:XLV','Producer Manufacturing':'AMEX:XLI',
+  'Communications':'AMEX:XLC','Consumer Durables':'AMEX:XLY',
+  'Consumer Non-Durables':'AMEX:XLP','Non-Energy Minerals':'AMEX:XLB',
+  'Finance/Real Estate':'AMEX:XLRE','Utilities':'AMEX:XLU',
+  'Electronic Technology':'AMEX:SMH','Health Services':'AMEX:IBB',
+  'Retail Trade':'AMEX:XRT','Transportation':'AMEX:XTN'
+};
+var BG_SECTOR_ETF_REVERSE = {};
+Object.keys(BG_SECTOR_ETF_MAP).forEach(function (k) { BG_SECTOR_ETF_REVERSE[BG_SECTOR_ETF_MAP[k]] = k; });
+
+var BG_REGIME_MATRIX = {
+  'BULLISH|UPTREND':'STRONG_UP','BULLISH|PULLBACK':'PULLBACK_BULL','BULLISH|REBOUND':'UP',
+  'BULLISH|SIDEWAYS':'CHOP_BULL','BULLISH|DOWNTREND':'CORRECTION',
+  'RECOVERING|UPTREND':'WEAK_UP','RECOVERING|PULLBACK':'RECOVERY','RECOVERING|REBOUND':'RECOVERY',
+  'RECOVERING|SIDEWAYS':'BASING','RECOVERING|DOWNTREND':'DOWN',
+  'WEAKENING|UPTREND':'RECOVERY','WEAKENING|PULLBACK':'TOPPING','WEAKENING|REBOUND':'BEAR_RALLY',
+  'WEAKENING|SIDEWAYS':'CHOP_BEAR','WEAKENING|DOWNTREND':'DOWN',
+  'BEARISH|UPTREND':'BEAR_RALLY','BEARISH|PULLBACK':'DOWN','BEARISH|REBOUND':'BEAR_RALLY',
+  'BEARISH|SIDEWAYS':'BASING','BEARISH|DOWNTREND':'STRONG_DOWN'
+};
+var BG_REGIME_CATALOG = {
+  EXTENDED_UP:{label:'Extended uptrend',bias:'LONG'}, STRONG_UP:{label:'Strong uptrend',bias:'LONG'},
+  UP:{label:'Uptrend (resuming)',bias:'LONG'}, WEAK_UP:{label:'Early uptrend (unconfirmed)',bias:'LONG'},
+  PULLBACK_BULL:{label:'Bull-market pullback',bias:'LONG'}, RECOVERY:{label:'Recovery attempt',bias:'NEUTRAL'},
+  BASING:{label:'Basing / bottoming',bias:'NEUTRAL'}, CHOP_BULL:{label:'Choppy range (above 200DMA)',bias:'NEUTRAL'},
+  CHOP_BEAR:{label:'Choppy range (below 200DMA)',bias:'NEUTRAL'}, CORRECTION:{label:'Correction (bull intact)',bias:'NEUTRAL'},
+  TOPPING:{label:'Topping / breaking down',bias:'SHORT'}, BEAR_RALLY:{label:'Bear-market rally',bias:'NEUTRAL'},
+  DOWN:{label:'Downtrend',bias:'SHORT'}, STRONG_DOWN:{label:'Strong downtrend',bias:'SHORT'},
+  CAPITULATION:{label:'Capitulation / oversold',bias:'SHORT'}, UNKNOWN:{label:'Unknown',bias:'NEUTRAL'}
+};
+
+function bg_num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
+function bg_clampN(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+function bg_storageGet(keys) {
+  return new Promise(function (resolve) {
+    try { chrome.storage.local.get(keys, function (r) { resolve(chrome.runtime.lastError ? {} : (r || {})); }); }
+    catch (_) { resolve({}); }
+  });
+}
+function bg_storageSet(obj) {
+  return new Promise(function (resolve) {
+    try { chrome.storage.local.set(obj, function () { resolve(!chrome.runtime.lastError); }); }
+    catch (_) { resolve(false); }
+  });
+}
+
+function bg_etDateStr() {
+  try { return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); }
+  catch (_) { return new Date().toISOString().slice(0, 10); }
+}
+function bg_etTimeStr() {
+  try { return new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+  catch (_) { return '??:??:??'; }
+}
+function bg_isWeekdayET() {
+  try { var d = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' }); return d !== 'Sat' && d !== 'Sun'; }
+  catch (_) { return true; }
+}
+function bg_getActiveSlot() {
+  try {
+    var t = new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: 'numeric', minute: '2-digit' });
+    var p = t.split(':'), etMin = parseInt(p[0]) * 60 + parseInt(p[1]);
+    var best = null, bestDiff = Infinity;
+    BG_SNAPSHOT_SLOTS.forEach(function (s) {
+      var sp = s.split(':'), sm = parseInt(sp[0]) * 60 + parseInt(sp[1]), diff = Math.abs(etMin - sm);
+      if (diff < bestDiff) { bestDiff = diff; best = s; }
+    });
+    return bestDiff <= 5 ? best : null;
+  } catch (_) { return null; }
+}
+
+// Pure computation functions — must stay in sync with popup.js equivalents
+function bg_computeMarketBiasDetail(ix) {
+  var sigs = [];
+  function addDay(ticker, d) {
+    if (!d || d.change == null) { sigs.push({ label: ticker + ' day', value: null, state: 'unknown', pts: 0 }); return; }
+    var pts = d.change > 0.3 ? 1 : d.change < -0.3 ? -1 : 0;
+    sigs.push({ label: ticker + ' day ' + (d.change >= 0 ? '+' : '') + d.change.toFixed(2) + '%', value: d.change, state: pts > 0 ? 'bull' : pts < 0 ? 'bear' : 'neu', pts: pts });
+  }
+  addDay('SPY', ix.SPY); addDay('QQQ', ix.QQQ); addDay('IWM', ix.IWM);
+  var vixPts = 0;
+  if (ix.VIX && ix.VIX.change != null) {
+    if (ix.VIX.change > 3) vixPts = -2; else if (ix.VIX.change > 1) vixPts = -1; else if (ix.VIX.change < -2) vixPts = 1;
+    sigs.push({ label: 'VIX day ' + (ix.VIX.change >= 0 ? '+' : '') + ix.VIX.change.toFixed(2) + '%', value: ix.VIX.change, state: vixPts > 0 ? 'bull' : vixPts < 0 ? 'bear' : 'neu', pts: vixPts });
+  } else { sigs.push({ label: 'VIX day', value: null, state: 'unknown', pts: 0 }); }
+  function addWeek(ticker, d) {
+    if (!d || d.weekChg == null) { sigs.push({ label: ticker + ' week', value: null, state: 'unknown', pts: 0 }); return; }
+    var pts = d.weekChg > 1 ? 1 : d.weekChg < -1 ? -1 : 0;
+    sigs.push({ label: ticker + ' week ' + (d.weekChg >= 0 ? '+' : '') + d.weekChg.toFixed(2) + '%', value: d.weekChg, state: pts > 0 ? 'bull' : pts < 0 ? 'bear' : 'neu', pts: pts });
+  }
+  addWeek('SPY', ix.SPY); addWeek('QQQ', ix.QQQ);
+  var score = sigs.reduce(function (acc, x) { return acc + x.pts; }, 0);
+  return { result: score >= 3 ? 'BULLISH' : score <= -3 ? 'BEARISH' : 'NEUTRAL', score: score, signals: sigs };
+}
+
+function bg_computeMarketStage(ix) {
+  var n = bg_num, src = ix.SPY, name = 'SPY';
+  function ok(d) { return d && n(d.close) != null && n(d.sma5) != null && n(d.sma20) != null; }
+  if (!ok(src)) { if (ok(ix.QQQ)) { src = ix.QQQ; name = 'QQQ'; } else return { stage: 'UNKNOWN', stageLabel: 'Indicators unavailable', bb: 'UNKNOWN', bbPct: null, signals: [], bull: 0, unk: 0, src: '' }; }
+  var sig = [];
+  function add(label, lhs, rhs, tf) {
+    if (n(lhs) == null || n(rhs) == null) { sig.push({ label: label, state: 'unknown', tf: tf }); return; }
+    sig.push({ label: label, state: lhs > rhs ? 'bull' : 'bear', tf: tf });
+  }
+  add('Close > 5DMA', src.close, src.sma5, 'D'); add('Close > 20DMA', src.close, src.sma20, 'D');
+  add('5DMA > 20DMA', src.sma5, src.sma20, 'D'); add('20DMA > 50DMA', src.sma20, src.sma50, 'D');
+  add('1H Close > 20MA', src.closeH, src.sma20H, 'H'); add('1H 5MA > 20MA', src.sma5H, src.sma20H, 'H');
+  var bull = sig.filter(function (x) { return x.state === 'bull'; }).length;
+  var unk = sig.filter(function (x) { return x.state === 'unknown'; }).length;
+  var ca5 = n(src.close) != null && n(src.sma5) != null ? src.close > src.sma5 : null;
+  var s5a20 = n(src.sma5) != null && n(src.sma20) != null ? src.sma5 > src.sma20 : null;
+  var stage, label;
+  if (bull >= 5) { stage = 'UPTREND'; label = 'Uptrend — buyers in control'; }
+  else if (bull === 4 && ca5 === true) { stage = 'UPTREND'; label = 'Uptrend — buyers in control'; }
+  else if (bull >= 3 && bull <= 4 && ca5 === false && s5a20 === true) { stage = 'PULLBACK'; label = 'Pullback — uptrend correction'; }
+  else if (bull >= 2 && bull <= 3 && ca5 === true && s5a20 === false) { stage = 'REBOUND'; label = 'Rebound — counter-rally in downtrend'; }
+  else if (bull >= 2 && bull <= 3) { stage = 'SIDEWAYS'; label = 'Sideways — no clear edge'; }
+  else { stage = 'DOWNTREND'; label = 'Downtrend — sellers in control'; }
+  var bb = 'UNKNOWN', bbPct = null;
+  var up = src.bbUpper, lo = src.bbLower, cl = src.close;
+  if (n(up) == null || n(lo) == null) { up = src.bbUpperH; lo = src.bbLowerH; cl = src.closeH; }
+  if (n(up) != null && n(lo) != null && n(cl) != null && up > lo) {
+    var p = (cl - lo) / (up - lo); p = Math.max(0, Math.min(1, p));
+    bbPct = p; bb = p >= 0.75 ? 'UPPER' : p <= 0.25 ? 'LOWER' : 'MID';
+  }
+  return { stage: stage, stageLabel: label, bb: bb, bbPct: bbPct, signals: sig, bull: bull, unk: unk, src: name };
+}
+
+function bg_computeLongTermBias(ix) {
+  var n = bg_num, src = ix.SPY, name = 'SPY';
+  function ok(d) { return d && n(d.close) != null && n(d.sma200) != null && n(d.sma50) != null; }
+  if (!ok(src)) { if (ok(ix.QQQ)) { src = ix.QQQ; name = 'QQQ'; } else return { bias: 'UNKNOWN', label: '200DMA unavailable', dist: null, src: 'SPY' }; }
+  var above = src.close > src.sma200, golden = src.sma50 > src.sma200;
+  var dist = src.sma200 > 0 ? (src.close - src.sma200) / src.sma200 * 100 : null;
+  var bias, label;
+  if (above && golden) { bias = 'BULLISH'; label = 'Long-term uptrend (above 200DMA + golden cross)'; }
+  else if (above && !golden) { bias = 'RECOVERING'; label = 'Recovering — above 200DMA but 50<200 (death cross)'; }
+  else if (!above && golden) { bias = 'WEAKENING'; label = 'Weakening — below 200DMA but 50>200 (golden cross intact)'; }
+  else { bias = 'BEARISH'; label = 'Long-term downtrend (below 200DMA + death cross)'; }
+  return { bias: bias, label: label, dist: dist, src: name };
+}
+
+function bg_sectorShortTermBias(name, etf, spy) {
+  var e = etf[name], n = bg_num;
+  if (!e) return { dir: 'NEUTRAL', score: 0, dRS: 0, wRS: 0 };
+  var spyD = n(spy && spy.change) || 0, spyW = n(spy && spy.weekChg) || 0;
+  var eD = n(e.change) || 0, eW = n(e.weekChg) || 0;
+  var dRS = eD - spyD, wRS = eW - spyW, s = 0, c;
+  c = bg_clampN(eD / 1.5, -1, 1) * 18; s += c;
+  c = bg_clampN(eW / 4, -1, 1) * 14; s += c;
+  c = bg_clampN(dRS / 1.2, -1, 1) * 20; s += c;
+  c = bg_clampN(wRS / 3, -1, 1) * 16; s += c;
+  if (n(e.close) != null && n(e.vwap) != null && e.vwap > 0) { c = e.close > e.vwap ? 10 : -10; s += c; }
+  if (n(e.adx) != null && e.adx > 20) { c = (eD >= 0 ? 1 : -1) * Math.min((e.adx - 20) / 30, 1) * 12; s += c; }
+  if (n(e.rvol) != null && e.rvol >= 1.2) { c = (eD >= 0 ? 1 : -1) * 10; s += c; }
+  s = bg_clampN(s, -100, 100);
+  var dir = s >= 18 ? 'BULLISH' : s <= -18 ? 'BEARISH' : 'NEUTRAL';
+  return { dir: dir, score: Math.round(s), dRS: Math.round(dRS * 100) / 100, wRS: Math.round(wRS * 100) / 100 };
+}
+function bg_computeSectorBiasScores(etf, spy) {
+  var out = {};
+  Object.keys(etf).forEach(function (k) { out[k] = bg_sectorShortTermBias(k, etf, spy); });
+  return out;
+}
+
+function bg_regimeClassify(longTerm, stage, bb, shortBias) {
+  var L = String(longTerm || '').toUpperCase(), S = String(stage || '').toUpperCase();
+  var B = String(bb || '').toUpperCase(), SH = String(shortBias || '').toUpperCase();
+  if (SH !== 'BULLISH' && SH !== 'BEARISH') SH = 'NEUTRAL';
+  var slug = BG_REGIME_MATRIX[L + '|' + S] || 'UNKNOWN';
+  if (slug === 'STRONG_UP' && B === 'UPPER') slug = 'EXTENDED_UP';
+  if (slug === 'STRONG_DOWN' && B === 'LOWER') slug = 'CAPITULATION';
+  var cat = BG_REGIME_CATALOG[slug] || BG_REGIME_CATALOG.UNKNOWN;
+  return { slug: slug, label: cat.label, bias: cat.bias };
+}
+
+function bg_rowObj(item, cols) {
+  var d = item.d || [], o = {};
+  cols.forEach(function (c, i) { o[c] = d[i]; });
+  return o;
+}
+
+function bg_fetchMarketData() {
+  var n = bg_num;
+  var cols = ['close','change','Perf.W','VWAP','ADX','SMA5','SMA20','SMA50','SMA200',
+    'BB.upper','BB.lower','close|60','SMA5|60','SMA20|60','BB.upper|60','BB.lower|60'];
+  return fetch(TV_SCAN_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbols: { tickers: BG_MARKET_TICKERS }, columns: cols, options: { lang: 'en' } }) })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (data) {
+      var out = {};
+      (data.data || []).forEach(function (item) {
+        var r = bg_rowObj(item, cols), short = String(item.s || '').replace(/^.*:/, '');
+        out[short] = { change: n(r['change']), weekChg: n(r['Perf.W']), vwap: n(r['VWAP']), adx: n(r['ADX']),
+          close: n(r['close']), sma5: n(r['SMA5']), sma20: n(r['SMA20']), sma50: n(r['SMA50']), sma200: n(r['SMA200']),
+          bbUpper: n(r['BB.upper']), bbLower: n(r['BB.lower']), closeH: n(r['close|60']),
+          sma5H: n(r['SMA5|60']), sma20H: n(r['SMA20|60']), bbUpperH: n(r['BB.upper|60']), bbLowerH: n(r['BB.lower|60']) };
+      });
+      return out;
+    });
+}
+
+function bg_fetchSectorETFs() {
+  var n = bg_num;
+  var cols = ['close','change','Perf.W','VWAP','ADX','relative_volume_intraday|5'];
+  return fetch(TV_SCAN_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbols: { tickers: Object.values(BG_SECTOR_ETF_MAP) }, columns: cols, options: { lang: 'en' } }) })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (data) {
+      var out = {};
+      (data.data || []).forEach(function (item) {
+        var sym = String(item.s || ''), r = bg_rowObj(item, cols);
+        var name = BG_SECTOR_ETF_REVERSE[sym] || sym.replace(/^.*:/, '');
+        out[name] = { etf: sym.replace(/^.*:/, ''), close: n(r['close']), change: n(r['change']),
+          weekChg: n(r['Perf.W']), vwap: n(r['VWAP']), adx: n(r['ADX']), rvol: n(r['relative_volume_intraday|5']) };
+      });
+      return out;
+    });
+}
+
+function bg_fetchBreakoutStocks() {
+  var body = { columns: ['ticker-view'],
+    filter: [
+      { left: 'close', operation: 'egreater', right: 1 },
+      { left: 'relative_volume_10d_calc', operation: 'greater', right: 2 },
+      { left: 'Perf.W', operation: 'egreater', right: 2 }
+    ],
+    filter2: BG_STOCK_FILTER2, ignore_unknown_fields: false, markets: ['america'],
+    options: { lang: 'en' }, range: [0, 100], sort: { sortBy: 'Perf.W', sortOrder: 'desc' }, symbols: {} };
+  return fetch(TV_SCAN_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (data) {
+      return (data.data || []).map(function (item) {
+        var tv = bg_rowObj(item, ['ticker-view'])['ticker-view'], t = '';
+        if (tv && typeof tv === 'object' && tv.symbol) t = tv.symbol; else if (typeof tv === 'string') t = tv; else t = String(item.s || '');
+        return { ticker: t.replace(/^.*:/, '').trim() };
+      }).filter(function (s) { return s.ticker; });
+    });
+}
+
+function bg_buildMarketSnapshot(ix, etf, hot) {
+  var stDetail = bg_computeMarketBiasDetail(ix);
+  var midData  = bg_computeMarketStage(ix);
+  var ltData   = bg_computeLongTermBias(ix);
+  var rg       = bg_regimeClassify(ltData.bias, midData.stage, midData.bb, stDetail.result);
+  var scores   = bg_computeSectorBiasScores(etf, ix.SPY);
+  var sectors  = {};
+  Object.keys(etf).forEach(function (name) {
+    var e = etf[name], sc = scores[name] || { dir: 'NEUTRAL', score: 0, dRS: 0, wRS: 0 };
+    sectors[name] = { etf: e.etf, close: e.close, change: e.change, weekChg: e.weekChg,
+      adx: e.adx, bias: sc.dir, score: sc.score, dRS: sc.dRS, wRS: sc.wRS };
+  });
+  var indices = {};
+  ['SPY','QQQ','IWM','DIA','VIX'].forEach(function (k) {
+    if (!ix[k]) return;
+    indices[k] = { close: ix[k].close, change: ix[k].change, weekChg: ix[k].weekChg,
+      sma5: ix[k].sma5 || null, sma20: ix[k].sma20 || null, sma50: ix[k].sma50 || null,
+      sma200: ix[k].sma200 || null, closeH: ix[k].closeH || null,
+      sma5H: ix[k].sma5H || null, sma20H: ix[k].sma20H || null };
+  });
+  var ltSrc = ix[ltData.src] || {};
+  return {
+    indices: indices,
+    shortTerm: { result: stDetail.result, score: stDetail.score, signals: stDetail.signals },
+    midTerm: { result: midData.stage, stageLabel: midData.stageLabel, src: midData.src,
+      bull: midData.bull, unk: midData.unk || 0, bb: midData.bb, bbPct: midData.bbPct,
+      signals: midData.signals },
+    longTerm: { result: ltData.bias, label: ltData.label, src: ltData.src, dist: ltData.dist,
+      above200: ltSrc.close != null && ltSrc.sma200 != null ? ltSrc.close > ltSrc.sma200 : null,
+      goldenCross: ltSrc.sma50 != null && ltSrc.sma200 != null ? ltSrc.sma50 > ltSrc.sma200 : null },
+    regime: { slug: rg.slug, label: rg.label, bias: rg.bias },
+    sectors: sectors,
+    breakoutNames: (hot || []).map(function (s) { return s.ticker; })
+  };
+}
+
+function bg_checkMarketSnapshotComplete(snap) {
+  if (!snap) return { ok: false, reason: 'No snapshot data' };
+  if (!snap.indices || !snap.indices.SPY || snap.indices.SPY.close == null || snap.indices.SPY.change == null)
+    return { ok: false, reason: 'SPY data missing' };
+  if (!snap.indices.QQQ || snap.indices.QQQ.close == null) return { ok: false, reason: 'QQQ data missing' };
+  if (!snap.indices.VIX || snap.indices.VIX.change == null) return { ok: false, reason: 'VIX data missing' };
+  if (!snap.shortTerm || !snap.shortTerm.signals || snap.shortTerm.signals.length !== 6)
+    return { ok: false, reason: 'Short-term signals incomplete' };
+  if (!snap.midTerm || !snap.midTerm.signals || snap.midTerm.signals.length !== 6 || !snap.midTerm.src)
+    return { ok: false, reason: 'Mid-term signals incomplete' };
+  if (!snap.longTerm || snap.longTerm.dist == null) return { ok: false, reason: '200DMA unavailable' };
+  var nSectors = Object.keys(snap.sectors || {}).length;
+  if (nSectors < 10) return { ok: false, reason: 'Sectors incomplete (' + nSectors + ' loaded)' };
+  return { ok: true, reason: '' };
+}
+
+async function bg_saveSnapshotRecord(date, slot, capturedAt, snap, complete, reason) {
+  var r = await bg_storageGet(['marketSnapshots']);
+  var all = r.marketSnapshots || {};
+  if (!all[date]) all[date] = {};
+  if (all[date][slot] && all[date][slot].complete === true) return;
+  all[date][slot] = Object.assign({ slot: slot, capturedAt: capturedAt, ts: Date.now(),
+    complete: complete, reason: reason || '' }, snap || {});
+  await bg_storageSet({ marketSnapshots: all });
+}
+
+async function bg_captureAndSaveSnapshot(slot) {
+  var date = bg_etDateStr();
+  var r = await bg_storageGet(['marketSnapshots']);
+  var snaps = (r.marketSnapshots || {})[date] || {};
+  if (snaps[slot] && snaps[slot].complete === true) return;
+  var t0 = Date.now(), ix = {}, etf = {}, hot = [];
+  try {
+    var res = await Promise.all([
+      bg_fetchMarketData().catch(function () { return {}; }),
+      bg_fetchSectorETFs().catch(function () { return {}; }),
+      bg_fetchBreakoutStocks().catch(function () { return []; })
+    ]);
+    ix = res[0]; etf = res[1]; hot = res[2];
+  } catch (e) {
+    await bg_saveSnapshotRecord(date, slot, bg_etTimeStr(), null, false, 'Fetch failed: ' + e.message);
+    return;
+  }
+  var fetchDuration = Date.now() - t0;
+  if (fetchDuration > 90000) {
+    await bg_saveSnapshotRecord(date, slot, bg_etTimeStr(), null, false, 'Fetch took ' + Math.round(fetchDuration / 1000) + 's — data may reflect wrong time');
+    return;
+  }
+  var snap = bg_buildMarketSnapshot(ix, etf, hot);
+  var check = bg_checkMarketSnapshotComplete(snap);
+  await bg_saveSnapshotRecord(date, slot, bg_etTimeStr(), snap, check.ok, check.reason);
+  try {
+    chrome.runtime.sendMessage({ type: 'SNAPSHOT_UPDATED', date: date, slot: slot }, function () {
+      if (chrome.runtime.lastError) {}
+    });
+  } catch (_) {}
+}
+
+function setupSnapshotAlarms() {
+  chrome.alarms.get('snapshotCheck', function (existing) {
+    if (!existing) chrome.alarms.create('snapshotCheck', { periodInMinutes: 1 });
+  });
+}
+
+chrome.runtime.onInstalled.addListener(function () { setupSnapshotAlarms(); });
+chrome.runtime.onStartup.addListener(function () { setupSnapshotAlarms(); });
+
+chrome.alarms.onAlarm.addListener(async function (alarm) {
+  if (alarm.name !== 'snapshotCheck') return;
+  if (!bg_isWeekdayET()) return;
+  var slot = bg_getActiveSlot();
+  if (!slot) return;
+  var r = await bg_storageGet(['settings']);
+  var mode = (r.settings && r.settings.snapshotMode) || 'manual';
+  if (mode !== 'auto') return;
+  await bg_captureAndSaveSnapshot(slot);
+  if (slot === '09:35') {
+    try {
+      chrome.runtime.sendMessage({ type: 'AUTO_FREEZE_REQUEST', slot: slot }, function () {
+        if (chrome.runtime.lastError) {}
+      });
+    } catch (_) {}
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════
 // MESSAGE ROUTER — handles all actions from popup.js
 // ══════════════════════════════════════════════════════════════════════
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {

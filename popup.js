@@ -47,13 +47,14 @@ function rowObj(item, cols) {
 
 // ── persistent settings + chrome.storage helpers ───────────────────────
 var DEFAULT_SETTINGS = {
-  hotImmediate: 80,     // sector score ≥ this → HOT immediately
-  hotSustained: 65,     // score ≥ this → HOT only after holding hotSustainedDays sessions
-  hotSustainedDays: 2,  // consecutive refresh sessions (distinct ET days) required to enter
-  hotFloor: 40,         // once HOT, stays HOT while score ≥ this floor
-  hotCoolDays: 2,       // drop HOT only after score is below the floor for MORE than this many sessions
+  hotImmediate: 80,
+  hotSustained: 65,
+  hotSustainedDays: 2,
+  hotFloor: 40,
+  hotCoolDays: 2,
   finnhubKey: '',
-  finnhubNews: true     // include Finnhub news on cards (alongside TradingView); off = TradingView only
+  finnhubNews: true,
+  snapshotMode: 'manual'  // 'manual' | 'auto'
 };
 var settings = Object.assign({}, DEFAULT_SETTINGS);
 
@@ -432,15 +433,29 @@ function regimePlaybook(rg) {
 // ══════════════════════════════════════════════════════════════════════
 // MARKET-LEVEL COMPUTATIONS
 // ══════════════════════════════════════════════════════════════════════
-function computeMarketBias(ix) {
-  var s = 0;
-  function add(d, up, dn) { if (!d) return; if (d.change > up) s++; if (d.change < dn) s--; }
-  add(ix.SPY, 0.3, -0.3); add(ix.QQQ, 0.3, -0.3); add(ix.IWM, 0.3, -0.3);
-  if (ix.VIX) { if (ix.VIX.change > 3) s -= 2; else if (ix.VIX.change > 1) s--; else if (ix.VIX.change < -2) s++; }
-  if (ix.SPY) { if (ix.SPY.weekChg > 1) s++; if (ix.SPY.weekChg < -1) s--; }
-  if (ix.QQQ) { if (ix.QQQ.weekChg > 1) s++; if (ix.QQQ.weekChg < -1) s--; }
-  return s >= 3 ? 'BULLISH' : s <= -3 ? 'BEARISH' : 'NEUTRAL';
+function computeMarketBiasDetail(ix) {
+  var sigs = [];
+  function addDay(ticker, d) {
+    if (!d || d.change == null) { sigs.push({ label: ticker + ' day', value: null, state: 'unknown', pts: 0 }); return; }
+    var pts = d.change > 0.3 ? 1 : d.change < -0.3 ? -1 : 0;
+    sigs.push({ label: ticker + ' day ' + (d.change >= 0 ? '+' : '') + d.change.toFixed(2) + '%', value: d.change, state: pts > 0 ? 'bull' : pts < 0 ? 'bear' : 'neu', pts: pts });
+  }
+  addDay('SPY', ix.SPY); addDay('QQQ', ix.QQQ); addDay('IWM', ix.IWM);
+  var vixPts = 0;
+  if (ix.VIX && ix.VIX.change != null) {
+    if (ix.VIX.change > 3) vixPts = -2; else if (ix.VIX.change > 1) vixPts = -1; else if (ix.VIX.change < -2) vixPts = 1;
+    sigs.push({ label: 'VIX day ' + (ix.VIX.change >= 0 ? '+' : '') + ix.VIX.change.toFixed(2) + '%', value: ix.VIX.change, state: vixPts > 0 ? 'bull' : vixPts < 0 ? 'bear' : 'neu', pts: vixPts });
+  } else { sigs.push({ label: 'VIX day', value: null, state: 'unknown', pts: 0 }); }
+  function addWeek(ticker, d) {
+    if (!d || d.weekChg == null) { sigs.push({ label: ticker + ' week', value: null, state: 'unknown', pts: 0 }); return; }
+    var pts = d.weekChg > 1 ? 1 : d.weekChg < -1 ? -1 : 0;
+    sigs.push({ label: ticker + ' week ' + (d.weekChg >= 0 ? '+' : '') + d.weekChg.toFixed(2) + '%', value: d.weekChg, state: pts > 0 ? 'bull' : pts < 0 ? 'bear' : 'neu', pts: pts });
+  }
+  addWeek('SPY', ix.SPY); addWeek('QQQ', ix.QQQ);
+  var score = sigs.reduce(function (acc, x) { return acc + x.pts; }, 0);
+  return { result: score >= 3 ? 'BULLISH' : score <= -3 ? 'BEARISH' : 'NEUTRAL', score: score, signals: sigs };
 }
+function computeMarketBias(ix) { return computeMarketBiasDetail(ix).result; }
 function computeMarketStage(ix) {
   var src = ix.SPY, name = 'SPY';
   function ok(d) { return d && num(d.close) != null && num(d.sma5) != null && num(d.sma20) != null; }
@@ -735,31 +750,7 @@ function renderBiasPanel() {
   function shortDetail() {
     var ix = marketCtx.indices;
     if (!ix) return '<div class="sig-note">Refresh market data to compute signals.</div>';
-    var sigs = [];
-    function addDay(ticker, d) {
-      if (!d || d.change == null) { sigs.push({ label: ticker + ' day', state: 'unknown', pts: 0 }); return; }
-      var pts = d.change > 0.3 ? 1 : d.change < -0.3 ? -1 : 0;
-      var sign = d.change >= 0 ? '+' : '';
-      sigs.push({ label: ticker + ' day ' + sign + d.change.toFixed(2) + '%', state: pts > 0 ? 'bull' : pts < 0 ? 'bear' : 'neu', pts: pts });
-    }
-    addDay('SPY', ix.SPY); addDay('QQQ', ix.QQQ); addDay('IWM', ix.IWM);
-    var vixPts = 0;
-    if (ix.VIX && ix.VIX.change != null) {
-      if (ix.VIX.change > 3) vixPts = -2;
-      else if (ix.VIX.change > 1) vixPts = -1;
-      else if (ix.VIX.change < -2) vixPts = 1;
-      var vs = ix.VIX.change >= 0 ? '+' : '';
-      sigs.push({ label: 'VIX day ' + vs + ix.VIX.change.toFixed(2) + '%', state: vixPts > 0 ? 'bull' : vixPts < 0 ? 'bear' : 'neu', pts: vixPts });
-    } else { sigs.push({ label: 'VIX', state: 'unknown', pts: 0 }); }
-    function addWeek(ticker, d) {
-      if (!d || d.weekChg == null) { sigs.push({ label: ticker + ' week', state: 'unknown', pts: 0 }); return; }
-      var pts = d.weekChg > 1 ? 1 : d.weekChg < -1 ? -1 : 0;
-      var sign = d.weekChg >= 0 ? '+' : '';
-      sigs.push({ label: ticker + ' week ' + sign + d.weekChg.toFixed(2) + '%', state: pts > 0 ? 'bull' : pts < 0 ? 'bear' : 'neu', pts: pts });
-    }
-    addWeek('SPY', ix.SPY); addWeek('QQQ', ix.QQQ);
-    var total = sigs.reduce(function (acc, x) { return acc + x.pts; }, 0);
-    var result = total >= 3 ? 'BULLISH' : total <= -3 ? 'BEARISH' : 'NEUTRAL';
+    var d = computeMarketBiasDetail(ix), sigs = d.signals, total = d.score, result = d.result;
     var h = '<div class="sig-note" style="margin-bottom:6px">Score ' + (total > 0 ? '+' : '') + total + ' → ' + result + ' (±3 threshold)</div>';
     h += '<div class="sig-grid"><div class="sig-hdr"><span>Signal</span><span>State</span><span>Pts</span></div>';
     sigs.forEach(function (x) {
@@ -916,7 +907,7 @@ function renderHeatmap() {
       '</div>';
   }).join('');
 }
-function renderMarket() { renderIdx(); renderBiasPanel(); renderSectorBias(); renderHeatmap(); }
+function renderMarket() { renderIdx(); renderBiasPanel(); renderSectorBias(); renderHeatmap(); renderSnapshotBar(); }
 
 // ── orchestration ──────────────────────────────────────────────────────
 async function refreshMarket() {
@@ -943,6 +934,258 @@ async function refreshMarket() {
     $('mktStatus').textContent = 'Error: ' + e.message;
   }
   $('mktRefresh').disabled = false;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// SNAPSHOT SYSTEM — Register 1: Frozen Screener / Register 2: Market Snapshots
+// ══════════════════════════════════════════════════════════════════════
+var SNAPSHOT_SLOTS = ['09:30','09:35','09:40','09:45','09:50','09:55','10:00'];
+
+// ET time as "HH:MM:SS" string
+function etTimeStr(ms) {
+  try {
+    return new Date(ms == null ? Date.now() : ms).toLocaleTimeString('en-US',
+      { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch (_) { return '??:??:??'; }
+}
+
+// Returns the nearest snapshot slot label if current ET time is within ±5 min, else null
+function getActiveSlot(ms) {
+  try {
+    var d = new Date(ms == null ? Date.now() : ms);
+    var t = d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: 'numeric', minute: '2-digit' });
+    var parts = t.split(':');
+    var etMin = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+    var best = null, bestDiff = Infinity;
+    SNAPSHOT_SLOTS.forEach(function (s) {
+      var sp = s.split(':'); var sm = parseInt(sp[0]) * 60 + parseInt(sp[1]);
+      var diff = Math.abs(etMin - sm);
+      if (diff < bestDiff) { bestDiff = diff; best = s; }
+    });
+    return bestDiff <= 5 ? best : null;
+  } catch (_) { return null; }
+}
+
+// ── Phase 2: Market Snapshot data layer ─────────────────────────────
+function buildMarketSnapshot(ix, etf, hot) {
+  var stDetail = computeMarketBiasDetail(ix);
+  var midData  = computeMarketStage(ix);
+  var ltData   = computeLongTermBias(ix);
+  var rg       = regimeClassify(ltData.bias, midData.stage, midData.bb, stDetail.result);
+  var scores   = computeSectorBiasScores(etf, ix.SPY);
+  var sectors  = {};
+  Object.keys(etf).forEach(function (name) {
+    var e = etf[name], sc = scores[name] || { dir: 'NEUTRAL', score: 0, dRS: 0, wRS: 0 };
+    sectors[name] = { etf: e.etf, close: e.close, change: e.change, weekChg: e.weekChg,
+      adx: e.adx, bias: sc.dir, score: sc.score, dRS: sc.dRS, wRS: sc.wRS };
+  });
+  var indices = {};
+  ['SPY','QQQ','IWM','DIA','VIX'].forEach(function (k) {
+    if (!ix[k]) return;
+    indices[k] = { close: ix[k].close, change: ix[k].change, weekChg: ix[k].weekChg,
+      sma5: ix[k].sma5 || null, sma20: ix[k].sma20 || null, sma50: ix[k].sma50 || null,
+      sma200: ix[k].sma200 || null, closeH: ix[k].closeH || null,
+      sma5H: ix[k].sma5H || null, sma20H: ix[k].sma20H || null };
+  });
+  var ltSrc = ix[ltData.src] || {};
+  return {
+    indices: indices,
+    shortTerm: { result: stDetail.result, score: stDetail.score, signals: stDetail.signals },
+    midTerm: { result: midData.stage, stageLabel: midData.stageLabel, src: midData.src,
+      bull: midData.bull, unk: midData.unk || 0, bb: midData.bb, bbPct: midData.bbPct,
+      signals: midData.signals },
+    longTerm: { result: ltData.bias, label: ltData.label, src: ltData.src, dist: ltData.dist,
+      above200: ltSrc.close != null && ltSrc.sma200 != null ? ltSrc.close > ltSrc.sma200 : null,
+      goldenCross: ltSrc.sma50 != null && ltSrc.sma200 != null ? ltSrc.sma50 > ltSrc.sma200 : null },
+    regime: { slug: rg.slug, label: rg.label, icon: rg.icon, stance: rg.stance,
+      guidance: rg.guidance, confidence: rg.confidence, aligned: rg.aligned, inputs: rg.inputs },
+    sectors: sectors,
+    breakoutNames: (hot || []).map(function (s) { return s.ticker; })
+  };
+}
+
+function checkMarketSnapshotComplete(snap) {
+  if (!snap) return { ok: false, reason: 'No snapshot data' };
+  if (!snap.indices || !snap.indices.SPY || snap.indices.SPY.close == null || snap.indices.SPY.change == null)
+    return { ok: false, reason: 'SPY data missing' };
+  if (!snap.indices.QQQ || snap.indices.QQQ.close == null)
+    return { ok: false, reason: 'QQQ data missing' };
+  if (!snap.indices.VIX || snap.indices.VIX.change == null)
+    return { ok: false, reason: 'VIX data missing' };
+  if (!snap.shortTerm || !snap.shortTerm.signals || snap.shortTerm.signals.length !== 6)
+    return { ok: false, reason: 'Short-term signals incomplete' };
+  if (!snap.midTerm || !snap.midTerm.signals || snap.midTerm.signals.length !== 6 || !snap.midTerm.src)
+    return { ok: false, reason: 'Mid-term signals incomplete' };
+  if (!snap.longTerm || snap.longTerm.dist == null)
+    return { ok: false, reason: '200DMA unavailable' };
+  var nSectors = Object.keys(snap.sectors || {}).length;
+  if (nSectors < 10) return { ok: false, reason: 'Sectors incomplete (' + nSectors + ' loaded)' };
+  return { ok: true, reason: '' };
+}
+
+async function captureMarketSnapshot() {
+  var t0 = Date.now();
+  var ix, etf, hot;
+  try {
+    var res = await Promise.all([
+      fetchMarketData().catch(function () { return {}; }),
+      fetchSectorETFs().catch(function () { return {}; }),
+      fetchBreakoutStocks().catch(function () { return []; })
+    ]);
+    ix = res[0]; etf = res[1]; hot = res[2];
+  } catch (e) {
+    return { snap: null, complete: false, reason: 'Fetch failed: ' + e.message, capturedAt: etTimeStr(), fetchDuration: Date.now() - t0 };
+  }
+  var fetchDuration = Date.now() - t0;
+  if (fetchDuration > 90000)
+    return { snap: null, complete: false, reason: 'Fetch took ' + Math.round(fetchDuration / 1000) + 's — data may reflect wrong time', capturedAt: etTimeStr(), fetchDuration: fetchDuration };
+  var snap = buildMarketSnapshot(ix, etf, hot);
+  var check = checkMarketSnapshotComplete(snap);
+  return { snap: snap, complete: check.ok, reason: check.reason, capturedAt: etTimeStr(), fetchDuration: fetchDuration };
+}
+
+function saveMarketSnapshot(date, slot, capturedAt, snap, complete, reason) {
+  return storageGet(['marketSnapshots']).then(function (r) {
+    var store = r.marketSnapshots || {};
+    if (!store[date]) store[date] = {};
+    if (store[date][slot] && store[date][slot].complete === true)
+      return { saved: false, reason: 'Slot ' + slot + ' already locked' };
+    store[date][slot] = Object.assign({ slot: slot, capturedAt: capturedAt, ts: Date.now(),
+      complete: complete, reason: reason || '' }, snap || {});
+    return storageSet({ marketSnapshots: store }).then(function () { return { saved: true, reason: '' }; });
+  });
+}
+
+function loadMarketSnapshots(date) {
+  return storageGet(['marketSnapshots']).then(function (r) {
+    return (r.marketSnapshots || {})[date || etDateStr()] || {};
+  });
+}
+
+// ── Phase 3: Frozen Screener data layer ─────────────────────────────
+function screenerRanToday() {
+  var today = etDateStr();
+  return Object.keys(registry).some(function (k) { return registry[k].date === today; });
+}
+
+function buildFrozenScreenerEntry(slot, capturedAt) {
+  var today = etDateStr(), ctxTime = marketCtx.lastRefresh || 0, rows = {};
+  Object.keys(registry).forEach(function (k) {
+    var row = registry[k];
+    if (row.date !== today) return;
+    rows[row.stock.ticker] = Object.assign({}, row, { _stockTime: row.lastUpdated, _contextTime: ctxTime });
+  });
+  return { slot: slot, capturedAt: capturedAt, ts: Date.now(), _ctxTime: ctxTime, rows: rows };
+}
+
+function checkFrozenScreenerComplete(entry) {
+  if (!entry || !entry.rows) return { ok: false, reason: 'No rows' };
+  var keys = Object.keys(entry.rows);
+  if (!keys.length) return { ok: false, reason: 'Registry empty — run a screener first' };
+  var now = entry.ts || Date.now();
+  for (var i = 0; i < keys.length; i++) {
+    var row = entry.rows[keys[i]];
+    if (!row.stock || row.stock.price == null) return { ok: false, reason: 'Ghost row: ' + keys[i] + ' has no price' };
+    if (!row.context || row.context.longTerm === 'UNKNOWN') return { ok: false, reason: 'Market data not loaded — refresh market first' };
+    if (row.lastUpdated && (now - row.lastUpdated) > 10 * 60 * 1000)
+      return { ok: false, reason: 'Stock data stale: ' + keys[i] + ' last updated ' + Math.round((now - row.lastUpdated) / 60000) + ' min ago' };
+  }
+  if (entry._ctxTime && (now - entry._ctxTime) > 30 * 60 * 1000)
+    return { ok: false, reason: 'Market context stale: last refreshed ' + Math.round((now - entry._ctxTime) / 60000) + ' min ago' };
+  return { ok: true, reason: '' };
+}
+
+function saveFrozenScreener(date, entry, complete, reason) {
+  return storageGet(['frozenScreener']).then(function (r) {
+    var store = r.frozenScreener || {};
+    if (store[date] && store[date].complete === true)
+      return { saved: false, reason: 'Screener snapshot for ' + date + ' already locked' };
+    store[date] = Object.assign({}, entry, { complete: complete, reason: reason || '' });
+    return storageSet({ frozenScreener: store }).then(function () { return { saved: true, reason: '' }; });
+  });
+}
+
+function loadFrozenScreener(date) {
+  return storageGet(['frozenScreener']).then(function (r) {
+    return (r.frozenScreener || {})[date || etDateStr()] || null;
+  });
+}
+
+// ── Phase 5: Manual trigger UI ───────────────────────────────────────
+function renderSnapshotBar() {
+  var el = $('snapshotBar'); if (!el) return;
+  var today = etDateStr();
+  loadMarketSnapshots(today).then(function (snaps) {
+    var isAuto = settings.snapshotMode === 'auto';
+    var activeSlot = isAuto ? null : getActiveSlot();
+    var chips = SNAPSHOT_SLOTS.map(function (slot) {
+      var s = snaps[slot];
+      if (s && s.complete) return '<span class="snap-chip ok" title="Captured ' + esc(s.capturedAt) + '">✅ ' + slot + '</span>';
+      if (s && !s.complete) return '<span class="snap-chip warn" title="' + esc(s.reason) + '">⚠ ' + slot + '</span>';
+      if (!isAuto && slot === activeSlot) return '<button class="btn btn-sm snap-btn" data-slot="' + slot + '">📸 ' + slot + '</button>';
+      return '<span class="snap-chip na">— ' + slot + '</span>';
+    });
+    var modeTag = '<span class="snap-mode-tag">' + (isAuto ? '🤖 Auto' : '👆 Manual') + '</span>';
+    el.innerHTML = '<div class="snap-bar">' + modeTag + chips.join('') + '</div>';
+    if (!isAuto) {
+      var btns = el.querySelectorAll('.snap-btn');
+      Array.prototype.forEach.call(btns, function (btn) {
+        btn.addEventListener('click', function () { doMarketSnapshot(btn.getAttribute('data-slot')); });
+      });
+    }
+  });
+}
+
+async function doMarketSnapshot(slot) {
+  var el = $('snapshotBar'); if (!el) return;
+  var btn = el.querySelector('[data-slot="' + slot + '"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + slot; }
+  var result = await captureMarketSnapshot();
+  await saveMarketSnapshot(etDateStr(), slot, result.capturedAt, result.snap, result.complete, result.reason);
+  renderSnapshotBar();
+}
+
+function renderFreezeBtn() {
+  var el = $('freezeBar'); if (!el) return;
+  var today = etDateStr();
+  loadFrozenScreener(today).then(function (entry) {
+    if (entry && entry.complete) {
+      el.innerHTML = '<div class="snap-status ok">✅ Screener frozen ' + esc(entry.capturedAt) + '</div>'; return;
+    }
+    if (settings.snapshotMode === 'auto') {
+      el.innerHTML = entry
+        ? '<div class="snap-status warn">⚠ Auto-freeze incomplete: ' + esc(entry.reason) + '</div>'
+        : '<div class="snap-status muted">🤖 Auto mode — screener freezes at 09:35 if scan ran today</div>';
+      return;
+    }
+    var activeSlot = getActiveSlot();
+    var inWindow = activeSlot === '09:35';
+    if (!inWindow && !entry) {
+      el.innerHTML = '<div class="snap-status muted">📸 Freeze window: 09:30–09:40 ET</div>'; return;
+    }
+    var retryLabel = entry ? '📸 Retry freeze → ' + (activeSlot || '09:35') : '📸 Freeze Screener → ' + (activeSlot || '09:35');
+    var statusLine = entry ? '<div class="snap-status warn">⚠ Last attempt: ' + esc(entry.reason) + '</div>' : '';
+    el.innerHTML = statusLine + (inWindow
+      ? '<button class="btn btn-primary btn-sm" id="freezeBtn">' + retryLabel + '</button>'
+      : '<div class="snap-status muted">Window closed — retry opens 09:30 ET</div>');
+    var fb = $('freezeBtn');
+    if (fb) fb.addEventListener('click', doFreezeScreener);
+  });
+}
+
+async function doFreezeScreener() {
+  var fb = $('freezeBtn'); if (fb) fb.disabled = true;
+  var el = $('freezeBar');
+  if (el) el.innerHTML = '<div class="snap-status">⏳ Freezing…</div>';
+  var slot = getActiveSlot() || '09:35';
+  var capturedAt = etTimeStr();
+  var entry = buildFrozenScreenerEntry(slot, capturedAt);
+  var check = checkFrozenScreenerComplete(entry);
+  var result = await saveFrozenScreener(etDateStr(), entry, check.ok, check.reason);
+  if (!result.saved) {
+    var el2 = $('freezeBar');
+    if (el2) el2.innerHTML = '<div class="snap-status ok">🔒 Already locked</div>';
+  } else { renderFreezeBtn(); }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1431,8 +1674,9 @@ function renderScreenerFromRegistry() {
     return (b.lastUpdated || 0) - (a.lastUpdated || 0);
   });
   var host = $('scrResults');
-  if (!rows.length) { host.innerHTML = '<div class="empty">No candidates yet today. Run a scan above.</div>'; return 0; }
+  if (!rows.length) { host.innerHTML = '<div class="empty">No candidates yet today. Run a scan above.</div>'; renderFreezeBtn(); return 0; }
   host.innerHTML = rows.map(function (row) { return buildCard(row); }).join('');
+  renderFreezeBtn();
   return rows.length;
 }
 
@@ -1996,6 +2240,7 @@ function fillSettingsForm() {
   $('setHotCool').value = settings.hotCoolDays;
   $('setFinnhub').value = settings.finnhubKey || '';
   $('setFinnhubNews').checked = settings.finnhubNews !== false;
+  $('setSnapMode').value = settings.snapshotMode || 'manual';
 }
 function setSettingsStatus(msg) {
   $('setStatus').textContent = msg;
@@ -2019,11 +2264,17 @@ function initSettings() {
     settings.hotCoolDays = clampInt($('setHotCool').value, 1, 14, DEFAULT_SETTINGS.hotCoolDays);
     settings.finnhubKey = ($('setFinnhub').value || '').trim();
     settings.finnhubNews = !!$('setFinnhubNews').checked;
+    settings.snapshotMode = $('setSnapMode').value === 'auto' ? 'auto' : 'manual';
     // keep thresholds ordered: floor ≤ sustained ≤ immediate
     if (settings.hotSustained > settings.hotImmediate) settings.hotSustained = settings.hotImmediate;
     if (settings.hotFloor > settings.hotSustained) settings.hotFloor = settings.hotSustained;
     fillSettingsForm();
-    saveSettings().then(function () { setSettingsStatus('Saved ✓'); return recomputeHotFromStore(); });
+    saveSettings().then(function () {
+      setSettingsStatus('Saved ✓');
+      renderSnapshotBar();
+      renderFreezeBtn();
+      return recomputeHotFromStore();
+    });
   });
   $('setReset').addEventListener('click', function () {
     settings = Object.assign({}, DEFAULT_SETTINGS, { finnhubKey: settings.finnhubKey, finnhubNews: settings.finnhubNews });
@@ -2063,9 +2314,18 @@ document.addEventListener('DOMContentLoaded', function () {
   // (after shortlists so the ☆/★ state is correct) and the registry table.
   Promise.all([loadRegistry(), loadShortlists()]).then(function () {
     renderShortlist();
-    renderScreenerFromRegistry();
+    renderScreenerFromRegistry(); // also calls renderFreezeBtn() internally
     renderRegistryTable();
   });
+
+  // background → popup: snapshot captured automatically or freeze requested
+  if (chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener(function (msg) {
+      if (!msg) return;
+      if (msg.type === 'SNAPSHOT_UPDATED') { renderSnapshotBar(); renderFreezeBtn(); }
+      if (msg.type === 'AUTO_FREEZE_REQUEST' && settings.snapshotMode === 'auto') { doFreezeScreener(); }
+    });
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════════════

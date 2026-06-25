@@ -207,6 +207,22 @@
   .set-toggle{margin:0 0 11px;}
   .set-toggle label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--txt2);cursor:pointer;}
   .set-toggle input{width:16px;height:16px;accent-color:var(--teal);cursor:pointer;}
+  .set-field select{background:var(--inset);border:1px solid var(--border2);border-radius:7px;
+    padding:9px 10px;color:var(--txt);font-size:13px;}
+  .set-field select:focus{outline:none;border-color:var(--teal);}
+
+  /* ── Snapshot bar ── */
+  .snap-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 4px;}
+  .snap-chip{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;
+    font-size:11px;font-weight:700;border:1px solid var(--border2);background:#1e293b;color:var(--muted);cursor:pointer;}
+  .snap-chip:hover:not(:disabled){filter:brightness(1.2);border-color:var(--teal);}
+  .snap-chip:disabled{opacity:.5;cursor:not-allowed;}
+  .snap-chip.done{background:rgba(34,197,94,0.12);color:var(--green-s);border-color:rgba(34,197,94,0.45);}
+  .snap-chip.partial{background:rgba(251,191,36,0.10);color:var(--amber2);border-color:rgba(251,191,36,0.45);}
+  .snap-chip.active{border-color:var(--teal);color:var(--teal);background:rgba(94,234,212,0.08);}
+  .snap-auto-note{font-size:10px;color:var(--muted);font-style:italic;width:100%;margin-top:2px;}
+  .freeze-bar{margin:8px 0 4px;}
+  .freeze-bar .snap-note{font-size:10px;color:var(--muted);margin-top:4px;font-style:italic;}
 
   /* ── Screener card: tappable ticker + shortlist star ── */
   .scr-ticker.tap{cursor:pointer;}
@@ -394,6 +410,7 @@
       <button class="btn btn-primary" id="mktRefresh" style="flex:1">🔄 Refresh Market Data</button>
     </div>
     <div class="status" id="mktStatus"></div>
+    <div id="snapshotBar"></div>
 
     <div class="section">
       <div class="section-hdr">🎯 Market Pulse</div>
@@ -419,6 +436,7 @@
       <button class="btn btn-primary" id="scrRunAll" style="flex:1">▶ Run all 3 screeners</button>
     </div>
     <div class="row" id="scrButtons"></div>
+    <div id="freezeBar"></div>
     <div class="status" id="scrStatus"></div>
     <div id="scrResults"></div>
   </div>
@@ -647,6 +665,18 @@
       <div class="set-help">Used to pull company-news <b>summaries</b> onto screener cards. Grab a free key at finnhub.io (60 calls/min on the free tier). TradingView headlines are fetched without a key on a best-effort basis (unofficial endpoint, titles + links only). News loads per-card on demand to stay within the rate limit.</div>
       <div class="set-toggle"><label><input id="setFinnhubNews" type="checkbox"> Include Finnhub news on cards (in addition to TradingView)</label></div>
       <div class="set-field"><label>Finnhub API key</label><input id="setFinnhub" type="password" placeholder="paste key…" autocomplete="off" spellcheck="false"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-hdr">📸 Snapshot Mode</div>
+      <div class="set-help">Controls how the <b>Market Snapshots</b> (Register 2) and <b>Frozen Screener</b> (Register 1) are captured. In <b>Manual</b> mode you press the buttons on the Market and Screener tabs within ±5 min of each slot. In <b>Auto</b> mode the background service worker captures automatically at 09:30–10:00 ET every weekday — you still need the popup open for the frozen screener (it reads from live memory).</div>
+      <div class="set-field">
+        <label>Capture mode</label>
+        <select id="setSnapMode">
+          <option value="manual">Manual — press buttons to capture</option>
+          <option value="auto">Auto — capture at 09:30–10:00 ET automatically</option>
+        </select>
+      </div>
     </div>
 
     <div class="row">
