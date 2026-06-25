@@ -854,10 +854,10 @@ chrome.alarms.onAlarm.addListener(async function (alarm) {
   var mode = (r.settings && r.settings.snapshotMode) || 'manual';
   if (mode !== 'auto') return;
 
-  // 09:24 ET: pre-scan — run screeners before the capture window opens.
-  // Gives 11 min of freshness at the 09:35 freeze (bg check uses 15-min window).
+  // 09:28 ET: pre-scan — run screeners just before market open.
+  // Gives 7 min of freshness at the 09:35 freeze (bg check uses 15-min window).
   var hhmm = bg_getETHHMM();
-  if (hhmm === '09:24') {
+  if (hhmm === '09:28') {
     var today = bg_etDateStr();
     if (bg_preScanDoneDate !== today) {
       bg_preScanDoneDate = today;
