@@ -1088,4 +1088,27 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       .catch(function (e) { sendResponse({ ok: false, error: e.message }); });
     return true;
   }
+
+  // Trade Journal: sector + industry lookup for journal card context section
+  if (msg.action === 'fetchTickerProfile') {
+    var _ticker = encodeURIComponent(msg.ticker || '');
+    var _hosts = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+    function _tryProfileHost(i) {
+      if (i >= _hosts.length) return Promise.reject(new Error('Yahoo unreachable'));
+      return fetch('https://' + _hosts[i] + '/v10/finance/quoteSummary/' + _ticker + '?modules=assetProfile', {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }
+      }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (d) {
+        var res = d.quoteSummary && d.quoteSummary.result && d.quoteSummary.result[0];
+        var ap = res && res.assetProfile;
+        return { sector: (ap && ap.sector) || '', industry: (ap && ap.industry) || '' };
+      }).catch(function () { return _tryProfileHost(i + 1); });
+    }
+    _tryProfileHost(0)
+      .then(function (r) { sendResponse(r); })
+      .catch(function () { sendResponse({ sector: '', industry: '' }); });
+    return true;
+  }
 });

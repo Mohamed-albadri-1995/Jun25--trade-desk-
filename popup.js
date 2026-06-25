@@ -230,7 +230,17 @@ var SECTOR_FALLBACK_MAP = {
   'consumer services': 'Consumer Durables',
   'distribution services': 'Producer Manufacturing',
   'industrial services': 'Producer Manufacturing',
-  'process industries': 'Non-Energy Minerals'
+  'process industries': 'Non-Energy Minerals',
+  // Yahoo Finance sector names (differ from TradingView format)
+  'financial services': 'Finance',
+  'healthcare': 'Health Technology',
+  'energy': 'Energy Minerals',
+  'consumer cyclical': 'Consumer Durables',
+  'consumer defensive': 'Consumer Non-Durables',
+  'industrials': 'Producer Manufacturing',
+  'basic materials': 'Non-Energy Minerals',
+  'communication services': 'Communications',
+  'real estate': 'Finance/Real Estate'
 };
 function resolveBroadSector(stock) {
   if (!stock) return null;
@@ -4359,14 +4369,10 @@ function jnl_nearestSnapSlot(entryTs) {
   return best;
 }
 
-function jnl_buildMktCtxHtml(trade, daySnaps) {
-  var regKey = trade.ticker + '|' + trade.date;
-  var regEntry = registry[regKey];
-  var stock = regEntry && regEntry.stock;
-  var ctx = regEntry && regEntry.context;
-  var themes = (ctx && ctx.themes && ctx.themes.length) ? ctx.themes
-    : themesForTicker(trade.ticker, stock && stock.industry);
-  var broadSector = stock ? resolveBroadSector(stock) : null;
+function jnl_buildMktCtxHtml(trade, daySnaps, profile) {
+  var industry = (profile && profile.industry) || '';
+  var themes = themesForTicker(trade.ticker, industry);
+  var broadSector = resolveBroadSector({ sector: (profile && profile.sector) || '', industry: industry });
   var slot = jnl_nearestSnapSlot(trade.entryTs);
   var snap = slot && daySnaps && daySnaps[slot];
   if (!themes.length && !broadSector && !snap) return '';
@@ -4384,8 +4390,8 @@ function jnl_buildMktCtxHtml(trade, daySnaps) {
   }
   if (broadSector) {
     var secData = snap && snap.sectors && snap.sectors[broadSector];
-    var secBias = secData ? secData.bias : (ctx && ctx.secBias) || null;
-    var secScore = secData ? secData.score : (ctx && ctx.secScore != null ? ctx.secScore : null);
+    var secBias = secData ? secData.bias : null;
+    var secScore = secData ? secData.score : null;
     var biasColor = secBias === 'BULLISH' ? '#4ade80' : secBias === 'BEARISH' ? '#f87171' : '#94a3b8';
     h += '<div style="margin-bottom:6px;display:flex;align-items:center;gap:8px">';
     h += '<span style="font-size:9px;color:#475569;font-weight:600;letter-spacing:0.08em">SECTOR</span>';
@@ -4432,12 +4438,28 @@ function jnl_buildMktCtxHtml(trade, daySnaps) {
 
 function jnl_populateMktCtxCards(trades) {
   if (!trades || !trades.length) return;
-  storageGet(['marketSnapshots']).then(function(r) {
-    var allSnaps = r.marketSnapshots || {};
+  // Unique tickers
+  var tickers = [], seen = {};
+  trades.forEach(function(t) { if (!seen[t.ticker]) { seen[t.ticker] = true; tickers.push(t.ticker); } });
+  // Fetch Yahoo profile for each unique ticker + load snapshots in parallel
+  var profilePromises = tickers.map(function(ticker) {
+    return new Promise(function(resolve) {
+      chrome.runtime.sendMessage({ action: 'fetchTickerProfile', ticker: ticker }, function(r) {
+        resolve({ ticker: ticker, profile: r || {} });
+      });
+    });
+  });
+  Promise.all([
+    storageGet(['marketSnapshots']),
+    Promise.all(profilePromises)
+  ]).then(function(results) {
+    var allSnaps = results[0].marketSnapshots || {};
+    var profileByTicker = {};
+    results[1].forEach(function(x) { profileByTicker[x.ticker] = x.profile; });
     trades.forEach(function(t) {
       var el = document.getElementById('jnl-mktctx-' + t.id);
       if (!el) return;
-      el.innerHTML = jnl_buildMktCtxHtml(t, allSnaps[t.date] || {});
+      el.innerHTML = jnl_buildMktCtxHtml(t, allSnaps[t.date] || {}, profileByTicker[t.ticker] || {});
     });
   });
 }
