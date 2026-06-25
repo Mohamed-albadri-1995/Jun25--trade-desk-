@@ -1344,6 +1344,7 @@ function renderAllRegisters() {
   renderFrozenScreenerView();
   renderMarketSnapshotsView();
   renderEodOutcomeView();
+  renderMergedRegisterView();
 }
 
 // ── Register import / export ──────────────────────────────────────────
@@ -1847,6 +1848,188 @@ function importEodOutcomeCsv(file) {
   reader.readAsText(file);
 }
 
+// ── Merged Register (R1 + R3 + R2) ──────────────────────────────────────────
+
+var MERGED_CSV_HEADERS = [
+  // R1 day-level meta
+  'date','slot','captured_at','complete','reason',
+  // R1 stock identity
+  'ticker','tv_symbol','screeners',
+  // R1 price / technicals
+  'price','open','change_pct','prev_close','gap_pct','vwap',
+  'ema9','ema13','ema20','ema50','sma5',
+  'month_high','month_low','day_high','day_low','atr',
+  'pm_high','pm_low','pm_range','adr_pct','month_range_pos','pm_adr_ratio',
+  'mcap','float_shares','short_float','rvol','sector','industry',
+  // R1 context (market conditions at R1 capture time)
+  'st_bias','lt_bias','lt_label','mid_term','mid_term_label',
+  'sec_bias','sec_score','sec_hot','market_bias',
+  // R3 — 9:35 entry set
+  'entry35','hh35','ll35','down_r35','up_r35',
+  // R3 — 9:40 entry set
+  'entry40','hh40','ll40','down_r40','up_r40',
+  // R3 meta
+  'eod_atr','eod_atr_source','last_bar','fetched_at','eod_status',
+  // R2 at 09:35
+  'snap935_lt','snap935_mt','snap935_st','snap935_regime','snap935_sec_bias',
+  // R2 at 09:40
+  'snap940_lt','snap940_mt','snap940_st','snap940_regime','snap940_sec_bias'
+];
+
+function renderMergedRegisterView() {
+  var el = $('mergedRegisterView'); if (!el) return;
+  var dateEl = $('mergedDate');
+  var date = (dateEl && dateEl.value) || etDateStr();
+  storageGet(['frozenScreener', 'eodOutcome', 'marketSnapshots']).then(function (r) {
+    var r1Day = (r.frozenScreener || {})[date];
+    if (!r1Day || !r1Day.rows || !Object.keys(r1Day.rows).length) {
+      el.innerHTML = '<div class="empty" style="padding:12px;color:var(--muted)">No Register 1 data for ' + esc(date) + '.</div>';
+      return;
+    }
+    var r3Day  = (r.eodOutcome || {})[date] || {};
+    var r2Day  = (r.marketSnapshots || {})[date] || {};
+    var snap935 = r2Day['09:35'] || null;
+    var snap940 = r2Day['09:40'] || null;
+    var f2 = function (v) { return v != null && isFinite(v) ? Number(v).toFixed(2) : '—'; };
+    var grn = function (v) { return v != null && isFinite(v) && v > 1 ? ' style="color:#4ade80"' : ''; };
+    function biasCell(v) {
+      if (!v) return '<td style="color:#475569">—</td>';
+      var c = v === 'BULLISH' ? '#4ade80' : v === 'BEARISH' ? '#f87171' : '#94a3b8';
+      return '<td style="color:' + c + ';font-weight:600;font-size:10px">' + esc(v.slice(0,1)) + '</td>';
+    }
+    var tickers = Object.keys(r1Day.rows).sort();
+    var html = '<div class="snap-table-wrap"><table class="reg-table">';
+    html += '<tr>' +
+      '<th>Ticker</th><th>Sector</th><th>Price</th><th>Gap%</th><th>RVol</th><th>ATR</th>' +
+      '<th colspan="2" style="border-left:2px solid #4ade80">R3 9:40</th>' +
+      '<th>EOD</th>' +
+      '<th colspan="4" style="border-left:2px solid #60a5fa">R2 @ 09:35</th>' +
+      '<th colspan="4" style="border-left:2px solid #f59e0b">R2 @ 09:40</th>' +
+      '</tr>';
+    html += '<tr>' +
+      '<th></th><th></th><th></th><th></th><th></th><th></th>' +
+      '<th style="border-left:2px solid #4ade80">UpR</th><th>DnR</th>' +
+      '<th></th>' +
+      '<th style="border-left:2px solid #60a5fa">LT</th><th>MT</th><th>Regime</th><th>Sec</th>' +
+      '<th style="border-left:2px solid #f59e0b">LT</th><th>MT</th><th>Regime</th><th>Sec</th>' +
+      '</tr>';
+    tickers.forEach(function (ticker) {
+      var row = r1Day.rows[ticker], st = row.stock || {};
+      var e3  = (r3Day.rows && r3Day.rows[ticker]) || {};
+      var sec = st.sector || '';
+      var sb935 = snap935 && snap935.sectors && snap935.sectors[sec] ? snap935.sectors[sec].bias : null;
+      var sb940 = snap940 && snap940.sectors && snap940.sectors[sec] ? snap940.sectors[sec].bias : null;
+      var statusC = e3.status === 'ok' ? '#4ade80' : e3.status === 'partial_data' ? '#f59e0b' : '#475569';
+      html += '<tr>';
+      html += '<td style="color:#4ade80;font-weight:600">' + esc(ticker) + '</td>';
+      html += '<td style="color:var(--muted);font-size:10px">' + esc(sec) + '</td>';
+      html += '<td>' + f2(st.price) + '</td>';
+      html += '<td>' + (st.gapPct != null ? st.gapPct.toFixed(1) + '%' : '—') + '</td>';
+      html += '<td>' + f2(st.rvol) + '</td>';
+      html += '<td>' + f2(st.atr) + '</td>';
+      html += '<td style="border-left:2px solid #4ade80"' + grn(e3.upR40) + '>' + f2(e3.upR40) + '</td>';
+      html += '<td>' + f2(e3.downR40) + '</td>';
+      html += '<td style="color:' + statusC + ';font-size:10px">' + esc(e3.status || '—') + '</td>';
+      html += '<td style="border-left:2px solid #60a5fa">';
+      html += snap935 && snap935.longTerm ? (function(v){ var c=v==='BULLISH'?'#4ade80':v==='BEARISH'?'#f87171':'#94a3b8'; return '<span style="color:'+c+';font-weight:600">'+esc(v.slice(0,1))+'</span>'; })(snap935.longTerm.result||'') : '—';
+      html += '</td>';
+      html += '<td>';
+      html += snap935 && snap935.midTerm ? (function(v){ var c=v==='BULLISH'?'#4ade80':v==='BEARISH'?'#f87171':'#94a3b8'; return '<span style="color:'+c+';font-weight:600">'+esc(v.slice(0,1))+'</span>'; })(snap935.midTerm.result||'') : '—';
+      html += '</td>';
+      html += '<td style="color:#94a3b8;font-size:10px">' + esc((snap935 && snap935.regime && snap935.regime.slug) || '—') + '</td>';
+      html += '<td>';
+      html += sb935 ? (function(v){ var c=v==='BULLISH'?'#4ade80':v==='BEARISH'?'#f87171':'#94a3b8'; return '<span style="color:'+c+';font-weight:600">'+esc(v.slice(0,1))+'</span>'; })(sb935) : '—';
+      html += '</td>';
+      html += '<td style="border-left:2px solid #f59e0b">';
+      html += snap940 && snap940.longTerm ? (function(v){ var c=v==='BULLISH'?'#4ade80':v==='BEARISH'?'#f87171':'#94a3b8'; return '<span style="color:'+c+';font-weight:600">'+esc(v.slice(0,1))+'</span>'; })(snap940.longTerm.result||'') : '—';
+      html += '</td>';
+      html += '<td>';
+      html += snap940 && snap940.midTerm ? (function(v){ var c=v==='BULLISH'?'#4ade80':v==='BEARISH'?'#f87171':'#94a3b8'; return '<span style="color:'+c+';font-weight:600">'+esc(v.slice(0,1))+'</span>'; })(snap940.midTerm.result||'') : '—';
+      html += '</td>';
+      html += '<td style="color:#94a3b8;font-size:10px">' + esc((snap940 && snap940.regime && snap940.regime.slug) || '—') + '</td>';
+      html += '<td>';
+      html += sb940 ? (function(v){ var c=v==='BULLISH'?'#4ade80':v==='BEARISH'?'#f87171':'#94a3b8'; return '<span style="color:'+c+';font-weight:600">'+esc(v.slice(0,1))+'</span>'; })(sb940) : '—';
+      html += '</td>';
+      html += '</tr>';
+    });
+    html += '</table></div>';
+    var notes = [tickers.length + ' stocks', 'R1 captured ' + esc(r1Day.capturedAt || '') + ' ET'];
+    if (!snap935 && !snap940) notes.push('⚠ No R2 snapshots');
+    if (!r3Day.rows) notes.push('⚠ No R3 data');
+    html += '<div class="reg-note" style="margin-top:6px">' + notes.join(' · ') + '</div>';
+    el.innerHTML = html;
+  });
+}
+
+function exportMergedRegisterCsv() {
+  storageGet(['frozenScreener', 'eodOutcome', 'marketSnapshots']).then(function (r) {
+    var allR1 = r.frozenScreener || {};
+    var allR3 = r.eodOutcome     || {};
+    var allR2 = r.marketSnapshots || {};
+    var dates = Object.keys(allR1).sort();
+    if (!dates.length) { setIoStatus('mergedIoStatus', '⚠ No Register 1 data to export'); return; }
+    var n = function (v) { return v != null && isFinite(v) ? Number(v).toFixed(4) : ''; };
+    var rows = [];
+    dates.forEach(function (date) {
+      var r1Day = allR1[date];
+      if (!r1Day || !r1Day.rows) return;
+      var r3Day   = allR3[date] || {};
+      var r2Day   = allR2[date] || {};
+      var snap935 = r2Day['09:35'] || null;
+      var snap940 = r2Day['09:40'] || null;
+      Object.keys(r1Day.rows).sort().forEach(function (ticker) {
+        var row = r1Day.rows[ticker], st = row.stock || {}, ctx = row.context || {};
+        var e3  = (r3Day.rows && r3Day.rows[ticker]) || {};
+        var sec = st.sector || '';
+        var sb935 = snap935 && snap935.sectors && snap935.sectors[sec] ? snap935.sectors[sec].bias : '';
+        var sb940 = snap940 && snap940.sectors && snap940.sectors[sec] ? snap940.sectors[sec].bias : '';
+        rows.push({
+          date: date, slot: r1Day.slot || '', captured_at: r1Day.capturedAt || '',
+          complete: r1Day.complete ? 'true' : 'false', reason: r1Day.reason || '',
+          ticker: ticker, tv_symbol: st.tvSymbol || row.tvSymbol || '',
+          screeners: (row.screenerKeys || []).join('|'),
+          price: n(st.price), open: n(st.open), change_pct: n(st.change),
+          prev_close: n(st.prevClose), gap_pct: n(st.gapPct), vwap: n(st.vwap),
+          ema9: n(st.ema9), ema13: n(st.ema13), ema20: n(st.ema20), ema50: n(st.ema50), sma5: n(st.sma5),
+          month_high: n(st.monthHigh), month_low: n(st.monthLow),
+          day_high: n(st.dayHigh), day_low: n(st.dayLow), atr: n(st.atr),
+          pm_high: n(st.pmHigh), pm_low: n(st.pmLow), pm_range: n(st.pmRange),
+          adr_pct: n(st.adrPct), month_range_pos: n(st.monthRangePos), pm_adr_ratio: n(st.pmAdrRatio),
+          mcap: n(st.mcap), float_shares: n(st.floatShares), short_float: n(st.shortFloat),
+          rvol: n(st.rvol), sector: sec, industry: st.industry || '',
+          st_bias: ctx.shortTerm || '', lt_bias: ctx.longTerm || '',
+          lt_label: ctx.longTermLabel || '', mid_term: ctx.midTerm || '',
+          mid_term_label: ctx.midTermLabel || '', sec_bias: ctx.secBias || '',
+          sec_score: n(ctx.secScore),
+          sec_hot: ctx.secHot != null ? (ctx.secHot ? 'true' : 'false') : '',
+          market_bias: ctx.marketBias || '',
+          entry35: n(e3.entry35), hh35: n(e3.hh35), ll35: n(e3.ll35),
+          down_r35: n(e3.downR35), up_r35: n(e3.upR35),
+          entry40: n(e3.entry40), hh40: n(e3.hh40), ll40: n(e3.ll40),
+          down_r40: n(e3.downR40), up_r40: n(e3.upR40),
+          eod_atr: n(e3.atr), eod_atr_source: e3.atrSource || '',
+          last_bar: e3.lastBarTime || '',
+          fetched_at: e3.fetchedAt ? fmtETTime(e3.fetchedAt) : '',
+          eod_status: e3.status || '',
+          snap935_lt:       snap935 ? ((snap935.longTerm  && snap935.longTerm.result)  || '') : '',
+          snap935_mt:       snap935 ? ((snap935.midTerm   && snap935.midTerm.result)   || '') : '',
+          snap935_st:       snap935 ? ((snap935.shortTerm && snap935.shortTerm.result) || '') : '',
+          snap935_regime:   snap935 ? ((snap935.regime    && snap935.regime.slug)      || '') : '',
+          snap935_sec_bias: sb935,
+          snap940_lt:       snap940 ? ((snap940.longTerm  && snap940.longTerm.result)  || '') : '',
+          snap940_mt:       snap940 ? ((snap940.midTerm   && snap940.midTerm.result)   || '') : '',
+          snap940_st:       snap940 ? ((snap940.shortTerm && snap940.shortTerm.result) || '') : '',
+          snap940_regime:   snap940 ? ((snap940.regime    && snap940.regime.slug)      || '') : '',
+          snap940_sec_bias: sb940
+        });
+      });
+    });
+    if (!rows.length) { setIoStatus('mergedIoStatus', '⚠ No data rows to export'); return; }
+    downloadCSV(buildCSV(MERGED_CSV_HEADERS, rows), 'merged-register.csv');
+    setIoStatus('mergedIoStatus', '✅ merged-register.csv · ' + rows.length + ' rows · ' + dates.length + ' day(s)');
+  });
+}
+
 function initRegisterIO() {
   function wire(exportId, exportFn, importId, fileId, importFn) {
     var exBtn = $(exportId); if (exBtn) exBtn.addEventListener('click', exportFn);
@@ -1863,6 +2046,11 @@ function initRegisterIO() {
 
   wire('reg3ExportJson', exportEodOutcomeJson, 'reg3ImportJson', 'reg3ImportJsonFile', importEodOutcomeJson);
   wire('reg3ExportCsv',  exportEodOutcomeCsv,  'reg3ImportCsv',  'reg3ImportCsvFile',  importEodOutcomeCsv);
+
+  var mergedEx = $('mergedExportCsv');
+  if (mergedEx) mergedEx.addEventListener('click', exportMergedRegisterCsv);
+  var mergedDateEl = $('mergedDate');
+  if (mergedDateEl) { mergedDateEl.value = etDateStr(); mergedDateEl.addEventListener('change', renderMergedRegisterView); }
 
   var runBtn = $('reg3RunEod');
   if (runBtn) {

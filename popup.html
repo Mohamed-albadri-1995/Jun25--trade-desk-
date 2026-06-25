@@ -539,6 +539,18 @@
       <input type="file" id="reg3ImportCsvFile" accept=".csv" style="display:none">
     </div>
 
+    <!-- ── Merged Register (R1 + R3 + R2) ── -->
+    <div class="section">
+      <div class="section-hdr">🔗 Merged Register (R1 + R3 + R2)</div>
+      <div class="reg-note">Each screener stock (R1) joined with EOD outcomes (R3) and market conditions at 09:35 and 09:40 (R2). Table shows the selected date; CSV export includes all dates and all 75 columns.</div>
+      <div class="snap-io-bar">
+        <label style="font-size:11px;color:var(--muted)">Date <input type="date" id="mergedDate" style="margin-left:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:2px 4px;font-size:11px"></label>
+        <button class="btn btn-ghost" id="mergedExportCsv">⬇ Export All (CSV)</button>
+        <span id="mergedIoStatus" class="snap-io-status"></span>
+      </div>
+      <div id="mergedRegisterView"></div>
+    </div>
+
   </div>
 
   <!-- ════════════════════ SHORTLIST ════════════════════ -->
