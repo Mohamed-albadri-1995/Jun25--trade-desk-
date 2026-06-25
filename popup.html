@@ -476,9 +476,13 @@
       <div class="reg-note">Every scan writes here first; Screener cards are built from this registry. Each <b>ticker + day</b> is one record.</div>
       <div class="reg-toolbar">
         <button class="btn btn-primary" id="regExport">⬇ Export CSV</button>
+        <button class="btn btn-ghost" id="regExportJson">⬇ Backup JSON</button>
+        <button class="btn btn-ghost" id="regImportJson">⬆ Restore JSON</button>
         <button class="btn btn-ghost" id="regRefresh">🔄 Refresh</button>
         <button class="btn btn-ghost" id="regClear">🗑 Clear</button>
+        <span id="reg0IoStatus" class="snap-io-status"></span>
       </div>
+      <input type="file" id="reg0ImportJsonFile" accept=".json" style="display:none">
       <div class="status" id="regSummary"></div>
       <div class="status" id="regStatus"></div>
       <div class="reg-table-wrap" id="regTableWrap"></div>

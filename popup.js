@@ -2559,8 +2559,43 @@ function exportRegistryCsv() {
   } catch (_) { ok = downloadText(fname, csv); }
   setRegStatus(ok ? ('Exported ' + all.length + ' record' + (all.length === 1 ? '' : 's') + ' → ' + fname) : 'Export failed.');
 }
+function exportRegistryJson() {
+  var keys = Object.keys(registry);
+  if (!keys.length) { setRegStatus('Registry is empty — nothing to export.'); return; }
+  downloadJSON({ _type: 'registry', _exported: new Date().toISOString(), data: registry },
+    'candidate-registry-backup-' + etDateStr() + '.json');
+  setRegStatus('Exported ' + keys.length + ' records → candidate-registry-backup-' + etDateStr() + '.json');
+}
+
+function importRegistryJson(file) {
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      var raw = JSON.parse(e.target.result);
+      var incoming = (raw._type === 'registry' && raw.data) ? raw.data : raw;
+      if (typeof incoming !== 'object' || Array.isArray(incoming) || !Object.keys(incoming).length)
+        { setRegStatus('⚠ Invalid file — expected a registry backup JSON'); return; }
+      var count = Object.keys(incoming).length;
+      if (!window.confirm('Merge ' + count + ' records into the registry? Existing records for the same ticker+date will be overwritten.')) return;
+      Object.assign(registry, incoming);
+      saveRegistry().then(function () {
+        renderRegistryTable();
+        renderScreenerFromRegistry();
+        setRegStatus('✅ Restored ' + count + ' records from backup');
+      });
+    } catch (err) { setRegStatus('⚠ Parse error: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
 function initRegistry() {
   var ex = $('regExport'); if (ex) ex.addEventListener('click', exportRegistryCsv);
+  var exj = $('regExportJson'); if (exj) exj.addEventListener('click', exportRegistryJson);
+  var imBtn = $('regImportJson'), imFile = $('reg0ImportJsonFile');
+  if (imBtn && imFile) {
+    imBtn.addEventListener('click', function () { imFile.value = ''; imFile.click(); });
+    imFile.addEventListener('change', function () { if (imFile.files[0]) importRegistryJson(imFile.files[0]); });
+  }
   var rf = $('regRefresh'); if (rf) rf.addEventListener('click', renderRegistryTable);
   var cl = $('regClear');
   if (cl) cl.addEventListener('click', function () {
