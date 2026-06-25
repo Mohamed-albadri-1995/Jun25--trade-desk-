@@ -1266,6 +1266,118 @@ function renderAllRegisters() {
   renderMarketSnapshotsView();
 }
 
+// ── Register import / export ──────────────────────────────────────────
+function downloadJSON(obj, filename) {
+  var blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function setIoStatus(id, msg) {
+  var el = $(id); if (el) el.textContent = msg;
+}
+
+function exportFrozenScreener() {
+  var date = etDateStr();
+  loadFrozenScreener(date).then(function (entry) {
+    if (!entry) { setIoStatus('reg1IoStatus', '⚠ No data for ' + date); return; }
+    downloadJSON({ date: date, entry: entry }, 'frozen-screener-' + date + '.json');
+    setIoStatus('reg1IoStatus', '✅ Downloaded frozen-screener-' + date + '.json');
+  });
+}
+
+function importFrozenScreener(file) {
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      var data = JSON.parse(e.target.result);
+      var entry = data.entry || data;
+      var date = data.date || etDateStr();
+      if (!entry || typeof entry !== 'object' || !entry.rows) {
+        setIoStatus('reg1IoStatus', '⚠ Invalid file — missing rows'); return;
+      }
+      storageGet(['frozenScreener']).then(function (r) {
+        var store = r.frozenScreener || {};
+        if (store[date] && store[date].complete === true) {
+          if (!window.confirm('Frozen screener for ' + date + ' is already locked. Overwrite?')) return;
+        }
+        store[date] = entry;
+        storageSet({ frozenScreener: store }).then(function () {
+          renderFreezeBtn(); renderFrozenScreenerView();
+          setIoStatus('reg1IoStatus', '✅ Imported for ' + date + ' (' + Object.keys(entry.rows).length + ' stocks)');
+        });
+      });
+    } catch (err) { setIoStatus('reg1IoStatus', '⚠ Parse error: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+function exportMarketSnapshots() {
+  var date = etDateStr();
+  loadMarketSnapshots(date).then(function (snaps) {
+    if (!Object.keys(snaps).length) { setIoStatus('reg2IoStatus', '⚠ No snapshots for ' + date); return; }
+    downloadJSON({ date: date, slots: snaps }, 'market-snapshots-' + date + '.json');
+    setIoStatus('reg2IoStatus', '✅ Downloaded market-snapshots-' + date + '.json');
+  });
+}
+
+function importMarketSnapshots(file) {
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      var data = JSON.parse(e.target.result);
+      var slots = data.slots || data;
+      var date = data.date || etDateStr();
+      if (!slots || typeof slots !== 'object') {
+        setIoStatus('reg2IoStatus', '⚠ Invalid file — no slot data'); return;
+      }
+      var validSlots = Object.keys(slots).filter(function (k) { return SNAPSHOT_SLOTS.indexOf(k) !== -1; });
+      if (!validSlots.length) {
+        setIoStatus('reg2IoStatus', '⚠ No valid slots found (expected 09:30–10:00)'); return;
+      }
+      storageGet(['marketSnapshots']).then(function (r) {
+        var store = r.marketSnapshots || {};
+        var existing = store[date] || {};
+        var hasLocked = Object.keys(existing).some(function (s) { return existing[s] && existing[s].complete; });
+        if (hasLocked) {
+          if (!window.confirm('Some slots for ' + date + ' are already captured. Merge and overwrite?')) return;
+        }
+        store[date] = Object.assign({}, existing, slots);
+        storageSet({ marketSnapshots: store }).then(function () {
+          renderSnapshotBar(); renderMarketSnapshotsView();
+          setIoStatus('reg2IoStatus', '✅ Imported ' + validSlots.length + ' slot(s) for ' + date);
+        });
+      });
+    } catch (err) { setIoStatus('reg2IoStatus', '⚠ Parse error: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+function initRegisterIO() {
+  var r1ex = $('reg1Export');
+  if (r1ex) r1ex.addEventListener('click', exportFrozenScreener);
+
+  var r1im = $('reg1Import');
+  var r1file = $('reg1ImportFile');
+  if (r1im && r1file) {
+    r1im.addEventListener('click', function () { r1file.value = ''; r1file.click(); });
+    r1file.addEventListener('change', function () { if (r1file.files[0]) importFrozenScreener(r1file.files[0]); });
+  }
+
+  var r2ex = $('reg2Export');
+  if (r2ex) r2ex.addEventListener('click', exportMarketSnapshots);
+
+  var r2im = $('reg2Import');
+  var r2file = $('reg2ImportFile');
+  if (r2im && r2file) {
+    r2im.addEventListener('click', function () { r2file.value = ''; r2file.click(); });
+    r2file.addEventListener('change', function () { if (r2file.files[0]) importMarketSnapshots(r2file.files[0]); });
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // SCREENER TAB
 // ══════════════════════════════════════════════════════════════════════
@@ -2379,6 +2491,7 @@ document.addEventListener('DOMContentLoaded', function () {
   initShortlist();
   initShortlistStars();
   initRegistry();
+  initRegisterIO();
   $('mktRefresh').addEventListener('click', refreshMarket);
   $('scrRunAll').addEventListener('click', runAllScreeners);
   // load settings first (thresholds + key), then auto-load market
