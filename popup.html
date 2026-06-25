@@ -410,7 +410,6 @@
       <button class="btn btn-primary" id="mktRefresh" style="flex:1">🔄 Refresh Market Data</button>
     </div>
     <div class="status" id="mktStatus"></div>
-    <div id="snapshotBar"></div>
 
     <div class="section">
       <div class="section-hdr">🎯 Market Pulse</div>
@@ -436,7 +435,6 @@
       <button class="btn btn-primary" id="scrRunAll" style="flex:1">▶ Run all 3 screeners</button>
     </div>
     <div class="row" id="scrButtons"></div>
-    <div id="freezeBar"></div>
     <div class="status" id="scrStatus"></div>
     <div id="scrResults"></div>
   </div>
@@ -445,7 +443,7 @@
   <div id="pane-registry" class="pane">
     <style>
       .reg-toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
-      .reg-table-wrap{overflow:auto;border:1px solid var(--border2);border-radius:8px;max-height:70vh}
+      .reg-table-wrap{overflow:auto;border:1px solid var(--border2);border-radius:8px;max-height:50vh}
       table.reg-table{border-collapse:collapse;font-size:11px;white-space:nowrap;min-width:100%}
       table.reg-table th{position:sticky;top:0;background:#0f172a;color:#93c5fd;text-align:left;
         padding:6px 8px;border-bottom:1px solid var(--border2);font-weight:600;z-index:1}
@@ -455,17 +453,51 @@
       table.reg-table tr.reg-today td:nth-child(2){color:#fbbf24;font-weight:600}
       table.reg-table tr.reg-old td{color:#64748b}
       table.reg-table tr:hover td{background:rgba(148,163,184,0.06)}
+      /* Snapshot tables */
+      .snap-table-wrap{overflow:auto;border:1px solid var(--border2);border-radius:8px;margin-top:8px}
+      table.snap-table{border-collapse:collapse;font-size:11px;white-space:nowrap;min-width:100%}
+      table.snap-table th{background:#0f172a;color:#93c5fd;text-align:left;
+        padding:6px 8px;border-bottom:1px solid var(--border2);font-weight:600}
+      table.snap-table td{padding:5px 8px;border-bottom:1px solid rgba(148,163,184,0.08);color:var(--txt2)}
+      table.snap-table tr:hover td{background:rgba(148,163,184,0.06)}
+      .snap-slot-ok td{color:#e2e8f0} .snap-slot-ok td:first-child{color:#4ade80;font-weight:700}
+      .snap-slot-warn td:first-child{color:var(--amber2);font-weight:700}
+      .snap-slot-na td{color:#475569}
+      .reg-note{font-size:11px;color:var(--muted);margin:0 0 8px;line-height:1.5}
     </style>
-    <div class="h1">📋 Candidate Registry</div>
-    <div class="set-help">Every scan writes its results here first, then the Screener cards are built from this registry — so candidates that were live earlier in the day aren't lost when a later scan no longer returns them. Each <b>ticker + day</b> is one record: a stock that reappears the same day updates its row, the same ticker on a new day starts a fresh row, and past days are kept untouched for the record.</div>
-    <div class="reg-toolbar">
-      <button class="btn btn-primary" id="regExport">⬇ Export CSV</button>
-      <button class="btn btn-ghost" id="regRefresh">🔄 Refresh table</button>
-      <button class="btn btn-ghost" id="regClear">🗑 Clear registry</button>
+
+    <div class="h1">📋 Registers</div>
+
+    <!-- ── Register 0: Candidate Registry ── -->
+    <div class="section">
+      <div class="section-hdr">📋 Register 0 — Candidate Registry</div>
+      <div class="reg-note">Every scan writes here first; Screener cards are built from this registry. Each <b>ticker + day</b> is one record.</div>
+      <div class="reg-toolbar">
+        <button class="btn btn-primary" id="regExport">⬇ Export CSV</button>
+        <button class="btn btn-ghost" id="regRefresh">🔄 Refresh</button>
+        <button class="btn btn-ghost" id="regClear">🗑 Clear</button>
+      </div>
+      <div class="status" id="regSummary"></div>
+      <div class="status" id="regStatus"></div>
+      <div class="reg-table-wrap" id="regTableWrap"></div>
     </div>
-    <div class="status" id="regSummary"></div>
-    <div class="status" id="regStatus"></div>
-    <div class="reg-table-wrap" id="regTableWrap"></div>
+
+    <!-- ── Register 1: Frozen Screener ── -->
+    <div class="section">
+      <div class="section-hdr">📸 Register 1 — Frozen Screener</div>
+      <div class="reg-note">Point-in-time copy of the live registry at ~09:35 ET. Reads from the same in-memory registry the cards use. Locked once complete.</div>
+      <div id="freezeBar"></div>
+      <div id="frozenScreenerView"></div>
+    </div>
+
+    <!-- ── Register 2: Market Snapshots ── -->
+    <div class="section">
+      <div class="section-hdr">📊 Register 2 — Market Snapshots</div>
+      <div class="reg-note">Complete market state captured at each slot (09:30–10:00 ET). Each snapshot makes a fresh independent API fetch.</div>
+      <div id="snapshotBar"></div>
+      <div id="marketSnapshotsView"></div>
+    </div>
+
   </div>
 
   <!-- ════════════════════ SHORTLIST ════════════════════ -->

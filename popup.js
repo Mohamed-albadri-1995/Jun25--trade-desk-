@@ -907,7 +907,7 @@ function renderHeatmap() {
       '</div>';
   }).join('');
 }
-function renderMarket() { renderIdx(); renderBiasPanel(); renderSectorBias(); renderHeatmap(); renderSnapshotBar(); }
+function renderMarket() { renderIdx(); renderBiasPanel(); renderSectorBias(); renderHeatmap(); }
 
 // ── orchestration ──────────────────────────────────────────────────────
 async function refreshMarket() {
@@ -1143,6 +1143,7 @@ async function doMarketSnapshot(slot) {
   var result = await captureMarketSnapshot();
   await saveMarketSnapshot(etDateStr(), slot, result.capturedAt, result.snap, result.complete, result.reason);
   renderSnapshotBar();
+  renderMarketSnapshotsView();
 }
 
 function renderFreezeBtn() {
@@ -1185,7 +1186,85 @@ async function doFreezeScreener() {
   if (!result.saved) {
     var el2 = $('freezeBar');
     if (el2) el2.innerHTML = '<div class="snap-status ok">🔒 Already locked</div>';
-  } else { renderFreezeBtn(); }
+  } else { renderFreezeBtn(); renderFrozenScreenerView(); }
+}
+
+// ── Register data views (shown inside Registry tab) ──────────────────────────
+function renderFrozenScreenerView() {
+  var el = $('frozenScreenerView'); if (!el) return;
+  loadFrozenScreener(etDateStr()).then(function (entry) {
+    if (!entry || !entry.rows || !Object.keys(entry.rows).length) { el.innerHTML = ''; return; }
+    var keys = Object.keys(entry.rows).sort();
+    var statusCls = entry.complete ? 'snap-slot-ok' : 'snap-slot-warn';
+    var statusIcon = entry.complete ? '✅' : '⚠';
+    var rows = keys.map(function (ticker) {
+      var r = entry.rows[ticker];
+      var s = r.stock || {};
+      var chg = s.change != null ? ((s.change >= 0 ? '+' : '') + s.change.toFixed(2) + '%') : '—';
+      var chgCls = s.change > 0 ? 'pos' : s.change < 0 ? 'neg' : '';
+      var ctx = r.context || {};
+      var keys2 = (r.screenerKeys || []).join(', ') || '—';
+      var price = s.price != null ? '$' + s.price.toFixed(2) : '—';
+      return '<tr class="' + statusCls + '"><td>' + esc(ticker) + '</td>' +
+        '<td>' + price + '</td>' +
+        '<td class="' + chgCls + '">' + chg + '</td>' +
+        '<td>' + esc(keys2) + '</td>' +
+        '<td>' + esc(ctx.shortTerm || '—') + '</td>' +
+        '<td>' + esc(ctx.longTerm || '—') + '</td></tr>';
+    }).join('');
+    el.innerHTML = '<div class="snap-table-wrap">' +
+      '<table class="snap-table">' +
+      '<tr><th colspan="6">' + statusIcon + ' ' + keys.length + ' stocks · slot ' + esc(entry.slot || '—') +
+        ' · captured ' + esc(entry.capturedAt || '—') + (entry.complete ? '' : ' · ' + esc(entry.reason)) + '</th></tr>' +
+      '<tr><th>Ticker</th><th>Price</th><th>Chg%</th><th>Screeners</th><th>ST Bias</th><th>LT Bias</th></tr>' +
+      rows + '</table></div>';
+  });
+}
+
+function renderMarketSnapshotsView() {
+  var el = $('marketSnapshotsView'); if (!el) return;
+  loadMarketSnapshots(etDateStr()).then(function (snaps) {
+    var hasAny = Object.keys(snaps).length > 0;
+    if (!hasAny) { el.innerHTML = ''; return; }
+    var rows = SNAPSHOT_SLOTS.map(function (slot) {
+      var s = snaps[slot];
+      if (!s) return '<tr class="snap-slot-na"><td>' + slot + '</td><td colspan="7" style="color:#475569">—</td></tr>';
+      var icon = s.complete ? '✅' : '⚠';
+      if (!s.complete) {
+        return '<tr class="snap-slot-warn"><td>' + icon + ' ' + slot + '</td>' +
+          '<td colspan="7" style="color:var(--amber2)">' + esc(s.reason || 'incomplete') + '</td></tr>';
+      }
+      var ix = s.indices || {};
+      function chgCell(d) {
+        if (!d || d.change == null) return '<td>—</td>';
+        var v = d.change, cls = v > 0 ? 'pos' : v < 0 ? 'neg' : '';
+        return '<td class="' + cls + '">' + (v >= 0 ? '+' : '') + v.toFixed(2) + '%</td>';
+      }
+      var st = (s.shortTerm && s.shortTerm.result) || '—';
+      var stCls = st === 'BULLISH' ? 'pos' : st === 'BEARISH' ? 'neg' : '';
+      var regime = (s.regime && s.regime.slug) || '—';
+      var sectors = s.sectors ? Object.values(s.sectors) : [];
+      var bull = sectors.filter(function (x) { return x.bias === 'BULLISH'; }).length;
+      var bear = sectors.filter(function (x) { return x.bias === 'BEARISH'; }).length;
+      return '<tr class="snap-slot-ok"><td>✅ ' + slot + '</td>' +
+        chgCell(ix.SPY) + chgCell(ix.QQQ) + chgCell(ix.VIX) +
+        '<td class="' + stCls + '">' + st + '</td>' +
+        '<td>' + esc(regime.replace(/_/g, ' ')) + '</td>' +
+        '<td><span class="pos">↑' + bull + '</span> <span class="neg">↓' + bear + '</span></td>' +
+        '<td style="color:var(--muted);font-size:10px">' + esc(s.capturedAt || '') + '</td></tr>';
+    }).join('');
+    el.innerHTML = '<div class="snap-table-wrap">' +
+      '<table class="snap-table">' +
+      '<tr><th>Slot</th><th>SPY</th><th>QQQ</th><th>VIX</th><th>ST Bias</th><th>Regime</th><th>Sectors</th><th>Captured</th></tr>' +
+      rows + '</table></div>';
+  });
+}
+
+function renderAllRegisters() {
+  renderSnapshotBar();
+  renderFreezeBtn();
+  renderFrozenScreenerView();
+  renderMarketSnapshotsView();
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1674,9 +1753,8 @@ function renderScreenerFromRegistry() {
     return (b.lastUpdated || 0) - (a.lastUpdated || 0);
   });
   var host = $('scrResults');
-  if (!rows.length) { host.innerHTML = '<div class="empty">No candidates yet today. Run a scan above.</div>'; renderFreezeBtn(); return 0; }
+  if (!rows.length) { host.innerHTML = '<div class="empty">No candidates yet today. Run a scan above.</div>'; return 0; }
   host.innerHTML = rows.map(function (row) { return buildCard(row); }).join('');
-  renderFreezeBtn();
   return rows.length;
 }
 
@@ -2212,7 +2290,7 @@ function initTabs() {
       t.classList.add('active');
       var pane = t.getAttribute('data-pane');
       $(pane).classList.add('active');
-      if (pane === 'pane-registry') renderRegistryTable(); // always show the latest records
+      if (pane === 'pane-registry') { renderRegistryTable(); renderAllRegisters(); }
     });
   });
 }
@@ -2271,8 +2349,7 @@ function initSettings() {
     fillSettingsForm();
     saveSettings().then(function () {
       setSettingsStatus('Saved ✓');
-      renderSnapshotBar();
-      renderFreezeBtn();
+      renderAllRegisters();
       return recomputeHotFromStore();
     });
   });
@@ -2322,7 +2399,7 @@ document.addEventListener('DOMContentLoaded', function () {
   if (chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener(function (msg) {
       if (!msg) return;
-      if (msg.type === 'SNAPSHOT_UPDATED') { renderSnapshotBar(); renderFreezeBtn(); }
+      if (msg.type === 'SNAPSHOT_UPDATED') { renderAllRegisters(); }
       if (msg.type === 'AUTO_FREEZE_REQUEST' && settings.snapshotMode === 'auto') { doFreezeScreener(); }
     });
   }
