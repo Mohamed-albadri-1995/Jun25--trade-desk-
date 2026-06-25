@@ -294,6 +294,54 @@ var BG_STOCK_FILTER2 = {
   ]
 };
 
+// ── BG Screener scan — column set and screener configs (mirrors popup.js) ──
+var BG_TV_COLUMNS = [
+  'ticker-view', 'open', 'close', 'change', 'relative_volume_10d_calc',
+  'relative_volume_intraday|5', 'market_cap_basic', 'sector', 'industry',
+  'change_from_open', 'VWAP',
+  'High.1M', 'Low.1M', 'high', 'low', 'ATR',
+  'short_percentage_of_float', 'float_shares_outstanding',
+  'EMA9', 'EMA13', 'EMA20', 'EMA50', 'SMA5',
+  'premarket_high', 'premarket_low'
+];
+var BG_SCREENER_CONFIGS = {
+  trend: {
+    filters: [
+      { left: 'close', operation: 'egreater', right: 20 },
+      { left: 'close', operation: 'egreater', right: 'SMA5' },
+      { left: 'close', operation: 'egreater', right: 'VWAP' },
+      { left: 'close|1W', operation: 'greater', right: 'VWAP|1W' },
+      { left: 'close|1M', operation: 'greater', right: 'VWAP|1M' },
+      { left: 'EMA50|1', operation: 'greater', right: 'EMA120|1' },
+      { left: 'close|1', operation: 'egreater', right: 'EMA50|1' },
+      { left: 'average_volume_90d_calc', operation: 'greater', right: 1000000 },
+      { left: 'VWAP', operation: 'egreater', right: 'SMA75|5' },
+      { left: 'relative_volume_intraday|5', operation: 'greater', right: 3 },
+      { left: 'relative_volume_10d_calc', operation: 'greater', right: 1.5 },
+      { left: 'close', operation: 'egreater', right: 1 }
+    ],
+    sort: { sortBy: 'change', sortOrder: 'desc' }
+  },
+  premarket: {
+    filters: [
+      { left: 'close', operation: 'egreater', right: 0.5 },
+      { left: 'close', operation: 'egreater', right: 1 },
+      { left: 'average_volume_10d_calc', operation: 'greater', right: 2000000 },
+      { left: 'relative_volume_10d_calc', operation: 'greater', right: 3 },
+      { left: 'premarket_volume', operation: 'greater', right: 1500000 }
+    ],
+    sort: { sortBy: 'premarket_volume', sortOrder: 'desc' }
+  },
+  bigmoves: {
+    filters: [
+      { left: 'relative_volume_10d_calc', operation: 'greater', right: 10 },
+      { left: 'close', operation: 'egreater', right: 2 },
+      { left: 'average_volume_10d_calc', operation: 'greater', right: 2000000 }
+    ],
+    sort: { sortBy: 'relative_volume_10d_calc', sortOrder: 'desc' }
+  }
+};
+
 var BG_MARKET_TICKERS = ['AMEX:SPY','NASDAQ:QQQ','AMEX:DIA','AMEX:IWM','TVC:VIX'];
 var BG_SECTOR_ETF_MAP = {
   'Technology':'AMEX:XLK','Finance':'AMEX:XLF','Energy Minerals':'AMEX:XLE',
@@ -632,6 +680,164 @@ async function bg_captureAndSaveSnapshot(slot) {
   } catch (_) {}
 }
 
+// ── BG Screener helpers ────────────────────────────────────────────────
+function bg_getETHHMM() { return bg_etTimeStr().slice(0, 5); }
+
+function bg_tvScanDirect(body) {
+  return fetch('https://scanner.tradingview.com/america/scan', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+}
+
+function bg_rowObj(item, cols) {
+  var obj = {};
+  (cols || []).forEach(function (k, i) { obj[k] = item.d && item.d[i] !== undefined ? item.d[i] : null; });
+  return obj;
+}
+
+function bg_mapTvRowToStock(item, screenerKey) {
+  var r = bg_rowObj(item, BG_TV_COLUMNS), n = bg_num;
+  var tv = r['ticker-view'], t = '';
+  if (tv && typeof tv === 'object' && tv.symbol) t = tv.symbol;
+  else if (typeof tv === 'string') t = tv;
+  else t = String(item.s || '');
+  t = t.replace(/^.*:/, '').trim();
+  var close = n(r['close']), change = n(r['change']), cfo = n(r['change_from_open']);
+  var monthHigh = n(r['High.1M']), monthLow = n(r['Low.1M']), atr = n(r['ATR']);
+  var pmHigh = n(r['premarket_high']), pmLow = n(r['premarket_low']);
+  var pmRange = (pmHigh != null && pmLow != null) ? (pmHigh - pmLow) : null;
+  var adrPct = (atr != null && close != null && close > 0) ? (atr / close * 100) : null;
+  var monthRangePos = (monthHigh != null && monthLow != null && (monthHigh - monthLow) > 0 && close != null)
+    ? (close - monthLow) / (monthHigh - monthLow) * 100 : null;
+  var pmAdrRatio = (pmRange != null && atr != null && atr > 0) ? (pmRange / atr) : null;
+  return {
+    ticker: t, screenerKey: screenerKey || null, tvSymbol: String(item.s || ''),
+    price: close, open: n(r['open']), change: change,
+    prevClose: (close != null && change != null && (1 + change / 100) !== 0) ? close / (1 + change / 100) : null,
+    gapPct: (change != null && cfo != null) ? (change - cfo) : null,
+    vwap: n(r['VWAP']),
+    ema9: n(r['EMA9']), ema13: n(r['EMA13']), ema20: n(r['EMA20']), ema50: n(r['EMA50']), sma5: n(r['SMA5']),
+    monthHigh: monthHigh, monthLow: monthLow, dayHigh: n(r['high']), dayLow: n(r['low']), atr: atr,
+    pmHigh: pmHigh, pmLow: pmLow, pmRange: pmRange,
+    adrPct: adrPct, monthRangePos: monthRangePos, pmAdrRatio: pmAdrRatio,
+    mcap: n(r['market_cap_basic']), floatShares: n(r['float_shares_outstanding']),
+    shortFloat: n(r['short_percentage_of_float']),
+    rvol: n(r['relative_volume_intraday|5']) || n(r['relative_volume_10d_calc']),
+    sector: r['sector'] || '', industry: r['industry'] || ''
+  };
+}
+
+function bg_runScreener(key) {
+  var cfg = BG_SCREENER_CONFIGS[key];
+  var body = { columns: BG_TV_COLUMNS, filter: cfg.filters, filter2: BG_STOCK_FILTER2,
+    ignore_unknown_fields: false, markets: ['america'], options: { lang: 'en' },
+    range: [0, 50], sort: cfg.sort, symbols: {} };
+  return bg_tvScanDirect(body).then(function (data) {
+    return (data.data || []).map(function (item) { return bg_mapTvRowToStock(item, key); })
+      .filter(function (s) { return s.ticker; });
+  });
+}
+
+// Run all 3 screeners, upsert results into registry storage.
+var bg_preScanDoneDate = null;
+async function bg_preScan() {
+  var today = bg_etDateStr(), now = Date.now();
+  try {
+    var lists = await Promise.all([
+      bg_runScreener('trend').catch(function () { return []; }),
+      bg_runScreener('premarket').catch(function () { return []; }),
+      bg_runScreener('bigmoves').catch(function () { return []; })
+    ]);
+    var scrKeys = ['trend', 'premarket', 'bigmoves'], byTicker = {};
+    scrKeys.forEach(function (k, i) {
+      lists[i].forEach(function (s) {
+        if (!byTicker[s.ticker]) byTicker[s.ticker] = { stock: s, screenerKeys: [] };
+        if (byTicker[s.ticker].screenerKeys.indexOf(k) === -1) byTicker[s.ticker].screenerKeys.push(k);
+      });
+    });
+    var r = await bg_storageGet(['registry']);
+    var registry = r.registry || {};
+    var liveSet = {};
+    Object.keys(byTicker).forEach(function (ticker) {
+      liveSet[ticker] = true;
+      var e = byTicker[ticker], id = ticker + '|' + today, s = e.stock, row = registry[id];
+      if (row) {
+        row.stock = s; row.tvSymbol = s.tvSymbol || row.tvSymbol;
+        row.lastUpdated = now; row.liveNow = true;
+        e.screenerKeys.forEach(function (k) { if (row.screenerKeys.indexOf(k) === -1) row.screenerKeys.push(k); });
+      } else {
+        registry[id] = { id: id, ticker: ticker, date: today, tvSymbol: s.tvSymbol || '',
+          firstSeen: now, lastUpdated: now, liveNow: true,
+          screenerKeys: e.screenerKeys.slice(), stock: s, context: null, news: null };
+      }
+    });
+    Object.keys(registry).forEach(function (id) {
+      var row = registry[id];
+      if (row.date === today && !liveSet[row.ticker]) row.liveNow = false;
+    });
+    await bg_storageSet({ registry: registry });
+    chrome.runtime.sendMessage({ type: 'BG_SCAN_COMPLETE', date: today, count: Object.keys(byTicker).length }, function () {
+      if (chrome.runtime.lastError) {}
+    });
+  } catch (_) {}
+}
+
+// Build and save the frozen screener entry from registry + the just-captured market snapshot.
+// Uses a 15-min staleness window (scan runs 11 min before freeze).
+async function bg_buildAndSaveFrozenScreener(slot) {
+  var date = bg_etDateStr();
+  var r = await bg_storageGet(['frozenScreener']);
+  var store = r.frozenScreener || {};
+  if (store[date] && store[date].complete === true) return;
+
+  var r2 = await bg_storageGet(['registry', 'marketSnapshots']);
+  var registry = r2.registry || {};
+  var snap = ((r2.marketSnapshots || {})[date] || {})[slot]
+          || ((r2.marketSnapshots || {})[date] || {})['09:30'] || null;
+
+  var now = Date.now(), rows = {};
+  Object.keys(registry).forEach(function (id) {
+    var row = registry[id];
+    if (row.date !== date || !row.stock) return;
+    var ctx = null;
+    if (snap) {
+      var sc = (snap.sectors && snap.sectors[row.stock.sector || '']) || { bias: 'NEUTRAL', score: 0 };
+      ctx = {
+        secBias: sc.bias || 'NEUTRAL', secScore: sc.score,
+        secHot: (snap.breakoutNames || []).indexOf(row.ticker) !== -1,
+        shortTerm: (snap.shortTerm && snap.shortTerm.result) || 'NEUTRAL',
+        marketBias: (snap.shortTerm && snap.shortTerm.result) || 'NEUTRAL',
+        longTerm: (snap.longTerm && snap.longTerm.result) || 'UNKNOWN',
+        longTermLabel: (snap.longTerm && snap.longTerm.label) || '',
+        midTerm: (snap.midTerm && snap.midTerm.result) || 'UNKNOWN',
+        midTermLabel: (snap.midTerm && snap.midTerm.stageLabel) || ''
+      };
+    }
+    rows[row.stock.ticker] = Object.assign({}, row, {
+      context: ctx || row.context, _stockTime: row.lastUpdated, _contextTime: now
+    });
+  });
+
+  if (!Object.keys(rows).length) return;
+
+  var complete = true, reason = '';
+  var rKeys = Object.keys(rows);
+  for (var i = 0; i < rKeys.length; i++) {
+    var row = rows[rKeys[i]];
+    if (!row.stock || row.stock.price == null) { complete = false; reason = 'Ghost row: ' + rKeys[i]; break; }
+    if (!row.context || row.context.longTerm === 'UNKNOWN') { complete = false; reason = 'Market snapshot unavailable'; break; }
+    if (row.lastUpdated && (now - row.lastUpdated) > 15 * 60 * 1000) { complete = false; reason = 'Stock data stale: ' + rKeys[i]; break; }
+  }
+
+  store[date] = { slot: slot, capturedAt: bg_etTimeStr(), ts: now, _ctxTime: now,
+    rows: rows, complete: complete, reason: reason };
+  await bg_storageSet({ frozenScreener: store });
+  chrome.runtime.sendMessage({ type: 'SNAPSHOT_UPDATED', date: date, slot: slot }, function () {
+    if (chrome.runtime.lastError) {}
+  });
+}
+
 function setupSnapshotAlarms() {
   chrome.alarms.get('snapshotCheck', function (existing) {
     if (!existing) chrome.alarms.create('snapshotCheck', { periodInMinutes: 1 });
@@ -644,13 +850,30 @@ chrome.runtime.onStartup.addListener(function () { setupSnapshotAlarms(); });
 chrome.alarms.onAlarm.addListener(async function (alarm) {
   if (alarm.name !== 'snapshotCheck') return;
   if (!bg_isWeekdayET()) return;
-  var slot = bg_getActiveSlot();
-  if (!slot) return;
   var r = await bg_storageGet(['settings']);
   var mode = (r.settings && r.settings.snapshotMode) || 'manual';
   if (mode !== 'auto') return;
+
+  // 09:24 ET: pre-scan — run screeners before the capture window opens.
+  // Gives 11 min of freshness at the 09:35 freeze (bg check uses 15-min window).
+  var hhmm = bg_getETHHMM();
+  if (hhmm === '09:24') {
+    var today = bg_etDateStr();
+    if (bg_preScanDoneDate !== today) {
+      bg_preScanDoneDate = today;
+      await bg_preScan();
+    }
+  }
+
+  var slot = bg_getActiveSlot();
+  if (!slot) return;
   await bg_captureAndSaveSnapshot(slot);
+
   if (slot === '09:35') {
+    // Background builds the frozen screener from stored registry + this snapshot.
+    // If popup is also open it receives AUTO_FREEZE_REQUEST as a fallback, but
+    // saveFrozenScreener in popup will be blocked if bg already saved complete=true.
+    await bg_buildAndSaveFrozenScreener('09:35');
     try {
       chrome.runtime.sendMessage({ type: 'AUTO_FREEZE_REQUEST', slot: slot }, function () {
         if (chrome.runtime.lastError) {}

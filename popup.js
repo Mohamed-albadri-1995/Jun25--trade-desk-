@@ -2856,6 +2856,13 @@ document.addEventListener('DOMContentLoaded', function () {
       if (!msg) return;
       if (msg.type === 'SNAPSHOT_UPDATED') { renderAllRegisters(); }
       if (msg.type === 'AUTO_FREEZE_REQUEST' && settings.snapshotMode === 'auto') { doFreezeScreener(); }
+      if (msg.type === 'BG_SCAN_COMPLETE') {
+        loadRegistry().then(function () {
+          renderScreenerFromRegistry();
+          renderRegistryTable();
+          autoFetchNewsQueue(regTodayRows());
+        });
+      }
     });
   }
 });
