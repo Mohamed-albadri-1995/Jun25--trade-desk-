@@ -1,0 +1,6 @@
+node_modules/
+trade-desk.db
+trade-desk.db-shm
+trade-desk.db-wal
+*.db
+.env

@@ -1,0 +1,5 @@
+trade-desk-webapp/node_modules/
+trade-desk-webapp/*.db
+trade-desk-webapp/*.db-shm
+trade-desk-webapp/*.db-wal
+trade-desk-webapp/.env

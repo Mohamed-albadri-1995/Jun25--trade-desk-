@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trade Desk</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Status Bar ─────────────────────────────────────────────── -->
+  <div id="status-bar">
+    <div class="logo">Trade<span>Desk</span></div>
+    <div class="status-pill"><div class="dot"></div><span id="sb-time">--:--</span> ET</div>
+    <span id="sb-date" style="color:var(--muted)">----/--/--</span>
+    <span id="sb-mode" class="status-pill" style="margin-left:auto"></span>
+  </div>
+
+  <!-- ── Tab Navigation ─────────────────────────────────────────── -->
+  <div id="tab-nav">
+    <button class="tab-btn active" data-tab="market">Market</button>
+    <button class="tab-btn" data-tab="screener">Screener</button>
+    <button class="tab-btn" data-tab="data">Data</button>
+    <button class="tab-btn" data-tab="journal">Journal</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
+  </div>
+
+  <!-- ── Main ───────────────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- ══ MARKET TAB ═══════════════════════════════════════════════ -->
+    <div class="tab-pane active" id="pane-market">
+      <div class="io-bar">
+        <label>Date <input type="date" id="mkt-date"></label>
+        <button class="btn btn-primary" id="mkt-run-snap">▶ Capture Now</button>
+        <select id="mkt-slot-select" style="width:90px"></select>
+        <span class="io-status" id="mkt-status"></span>
+      </div>
+
+      <!-- Regime + Bias row -->
+      <div class="grid-2" style="margin-bottom:12px">
+        <div id="mkt-regime" class="regime-card"><div class="empty">No snapshot</div></div>
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">Bias Signals</div>
+          <div id="mkt-bias"></div>
+        </div>
+      </div>
+
+      <!-- Indices -->
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-title">Indices</div>
+        <div class="grid-4" id="mkt-indices"></div>
+      </div>
+
+      <!-- Sectors -->
+      <div class="card">
+        <div class="card-title">Sector Biases</div>
+        <div class="sector-grid" id="mkt-sectors"></div>
+      </div>
+    </div>
+
+    <!-- ══ SCREENER TAB ══════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-screener">
+      <div class="io-bar">
+        <label>Date <input type="date" id="scr-date"></label>
+        <button class="btn btn-green" id="scr-run">▶ Freeze Screener Now</button>
+        <span class="io-status" id="scr-status"></span>
+      </div>
+      <div class="table-wrap" id="scr-table-wrap">
+        <div class="empty">Select a date or wait for automatic capture at 09:35 ET.</div>
+      </div>
+    </div>
+
+    <!-- ══ DATA TAB ══════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-data">
+      <div class="sub-tabs">
+        <button class="sub-tab active" data-sub="r1">R1 Screener</button>
+        <button class="sub-tab" data-sub="r2">R2 Snapshots</button>
+        <button class="sub-tab" data-sub="r3">R3 EOD</button>
+        <button class="sub-tab" data-sub="merged">Merged</button>
+        <button class="sub-tab" data-sub="import">Import / Export</button>
+      </div>
+
+      <!-- R1 -->
+      <div class="sub-pane active" id="sub-r1">
+        <div class="io-bar">
+          <label>Date <input type="date" id="r1-date"></label>
+          <button class="btn" id="r1-export">⬇ Export CSV</button>
+          <span class="io-status" id="r1-status"></span>
+        </div>
+        <div class="table-wrap" id="r1-table"></div>
+      </div>
+
+      <!-- R2 -->
+      <div class="sub-pane" id="sub-r2">
+        <div class="io-bar">
+          <label>Date <input type="date" id="r2-date"></label>
+          <button class="btn" id="r2-export">⬇ Export JSON</button>
+          <span class="io-status" id="r2-status"></span>
+        </div>
+        <div class="slot-pills" id="r2-slots"></div>
+        <div id="r2-snap-detail"></div>
+      </div>
+
+      <!-- R3 -->
+      <div class="sub-pane" id="sub-r3">
+        <div class="io-bar">
+          <label>Date <input type="date" id="r3-date"></label>
+          <button class="btn btn-green" id="r3-run">▶ Run Now</button>
+          <button class="btn" id="r3-export">⬇ Export CSV</button>
+          <span class="io-status" id="r3-status"></span>
+        </div>
+        <div class="table-wrap" id="r3-table"></div>
+      </div>
+
+      <!-- Merged -->
+      <div class="sub-pane" id="sub-merged">
+        <div class="io-bar">
+          <label>Date <input type="date" id="merged-date"></label>
+          <button class="btn" id="merged-export">⬇ Export All (CSV)</button>
+          <span class="io-status" id="merged-status"></span>
+        </div>
+        <div class="table-wrap" id="merged-table"></div>
+      </div>
+
+      <!-- Import / Export -->
+      <div class="sub-pane" id="sub-import">
+        <div class="card">
+          <div class="section-hdr">Import from Extension Backup</div>
+          <p style="font-size:11px;color:var(--muted);margin-bottom:12px">
+            Upload a JSON backup file exported from the Chrome extension. Supported types:
+            frozenScreener, marketSnapshots, eodOutcome, journalTrades.
+          </p>
+          <div class="io-bar">
+            <input type="file" id="import-file" accept=".json">
+            <button class="btn btn-primary" id="import-btn">Upload & Import</button>
+            <span class="io-status" id="import-status"></span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-hdr">Export Backups</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" data-export="frozenScreener">⬇ R1 (Screener)</button>
+            <button class="btn" data-export="marketSnapshots">⬇ R2 (Snapshots)</button>
+            <button class="btn" data-export="eodOutcome">⬇ R3 (EOD)</button>
+            <button class="btn" data-export="journalTrades">⬇ Journal</button>
+          </div>
+          <span class="io-status" id="export-status" style="margin-top:8px;display:block"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ JOURNAL TAB ═══════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-journal">
+      <div class="io-bar">
+        <label>Filter date <input type="date" id="jnl-date"></label>
+        <button class="btn btn-primary" id="jnl-add">+ Add Trade</button>
+        <span class="io-status" id="jnl-status"></span>
+      </div>
+
+      <!-- Add / Edit form (hidden by default) -->
+      <div class="card" id="jnl-form-wrap" style="display:none">
+        <div class="section-hdr">
+          <span id="jnl-form-title">New Trade</span>
+          <button class="btn" id="jnl-form-cancel">Cancel</button>
+        </div>
+        <div class="grid-2" style="gap:10px;margin-bottom:10px">
+          <label style="color:var(--muted);font-size:11px">Ticker
+            <input type="text" id="jf-ticker" placeholder="AAPL" style="width:100%;margin-top:3px">
+          </label>
+          <label style="color:var(--muted);font-size:11px">Date
+            <input type="date" id="jf-date" style="width:100%;margin-top:3px">
+          </label>
+          <label style="color:var(--muted);font-size:11px">Side
+            <select id="jf-side" style="width:100%;margin-top:3px">
+              <option value="L">Long</option>
+              <option value="S">Short</option>
+            </select>
+          </label>
+          <label style="color:var(--muted);font-size:11px">Setup
+            <input type="text" id="jf-setup" placeholder="e.g. Gap&Go" style="width:100%;margin-top:3px">
+          </label>
+          <label style="color:var(--muted);font-size:11px">Entry
+            <input type="number" id="jf-entry" placeholder="0.00" step="0.01" style="width:100%;margin-top:3px">
+          </label>
+          <label style="color:var(--muted);font-size:11px">Exit
+            <input type="number" id="jf-exit" placeholder="0.00" step="0.01" style="width:100%;margin-top:3px">
+          </label>
+          <label style="color:var(--muted);font-size:11px">Shares
+            <input type="number" id="jf-shares" placeholder="100" step="1" style="width:100%;margin-top:3px">
+          </label>
+          <label style="color:var(--muted);font-size:11px">R multiple
+            <input type="number" id="jf-rmult" placeholder="e.g. 1.5" step="0.01" style="width:100%;margin-top:3px">
+          </label>
+        </div>
+        <label style="color:var(--muted);font-size:11px;display:block;margin-bottom:10px">Notes
+          <textarea id="jf-notes" rows="3" style="width:100%;margin-top:3px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;resize:vertical"></textarea>
+        </label>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="jnl-form-save">Save Trade</button>
+          <button class="btn" id="jnl-form-cancel2">Cancel</button>
+        </div>
+      </div>
+
+      <div id="jnl-list"><div class="empty">No trades found.</div></div>
+    </div>
+
+    <!-- ══ SETTINGS TAB ══════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-settings">
+      <div class="card">
+        <div class="card-title">Capture Mode</div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Automatic Mode</div>
+            <div class="setting-desc">When ON: snapshots, screener freeze, and EOD run automatically on schedule.</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="setting-auto">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Server Info</div>
+        <div class="stat-row"><span class="stat-label">Node.js</span><span class="stat-val mono" id="info-node">--</span></div>
+        <div class="stat-row"><span class="stat-label">ET Time</span><span class="stat-val mono" id="info-time">--</span></div>
+        <div class="stat-row"><span class="stat-label">ET Date</span><span class="stat-val mono" id="info-date">--</span></div>
+        <div class="stat-row"><span class="stat-label">Market Open</span><span class="stat-val" id="info-weekday">--</span></div>
+      </div>
+    </div>
+
+  </div><!-- #main -->
+</div><!-- #app -->
+
+<script src="app.js"></script>
+</body>
+</html>
