@@ -640,7 +640,7 @@ async function testNewFields() {
   // buildCard must render all new fields from the registry row (not recomputed live)
   row.inShortlist = false;
   const html = sandbox.buildCard(row);
-  ok(html.includes('ADR%'),             'NF: buildCard renders ADR%');
+  ok(html.includes('ADR:'),             'NF: buildCard renders ADR (absolute $)');
   ok(html.includes('Monthly position'), 'NF: buildCard renders Monthly position');
   ok(html.includes('PM Range'),         'NF: buildCard renders PM Range');
   ok(html.includes('PM / ADR'),         'NF: buildCard renders PM / ADR');

@@ -1154,11 +1154,12 @@ function buildCard(row) {
       }
     }
   }
-  // ADR% (ATR as % of price — average daily range)
-  if (s.adrPct != null) {
+  // ADR — shown as absolute $ (ATR), with % of price as context
+  // pmAdrRatio divides pmRange ($) by ATR ($), so both sides are always dollar amounts
+  if (s.atr != null && s.adrPct != null) {
     var adrCol = s.adrPct >= 5 ? 'var(--amber)' : s.adrPct >= 2 ? 'var(--green-s)' : 'var(--txt2)';
-    L.push('<div class="line"><b>ADR%:</b> <span style="color:' + adrCol + '">' + s.adrPct.toFixed(2) + '%</span>' +
-      ' <span class="sub9">(ATR ÷ price · avg daily range)</span></div>');
+    L.push('<div class="line"><b>ADR:</b> <span style="color:' + adrCol + '">$' + s.atr.toFixed(2) + '</span>' +
+      ' <span class="sub9">(' + s.adrPct.toFixed(1) + '% of price · avg daily range)</span></div>');
   }
   // PM range
   if (s.pmRange != null) {
@@ -1499,6 +1500,7 @@ var REG_COLUMNS = [
   { label: 'PM High', get: function (r) { return regFix(r.stock.pmHigh); } },
   { label: 'PM Low', get: function (r) { return regFix(r.stock.pmLow); } },
   { label: 'PM Range', get: function (r) { return regFix(r.stock.pmRange); } },
+  { label: 'ADR($)', get: function (r) { return regFix(r.stock.atr); } },
   { label: 'ADR%', get: function (r) { return regFix(r.stock.adrPct); } },
   { label: 'Mth pos%', get: function (r) { return regFix(r.stock.monthRangePos, 0); } },
   { label: 'PM/ADR', get: function (r) { return regFix(r.stock.pmAdrRatio); } },
