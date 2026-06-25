@@ -665,10 +665,9 @@ var marketCtx = {
 
 // Last-rendered screener stocks, keyed by ticker — lets the shortlist star
 // button look up the full row (tvSymbol, price, etc.) by ticker alone.
-var scrIndex = {};
 // Full shortlists store: { 'YYYY-MM-DD': { items:[…], exports:[…] } }. Loaded once,
 // kept in sync on every mutation. shortlistTodaySet caches today's tickers so
-// buildCard can render the correct star state synchronously.
+// registrySyncShortlist can stamp row.inShortlist before every card render.
 var shortlists = {};
 var shortlistTodaySet = {};
 
@@ -892,6 +891,8 @@ async function refreshMarket() {
     var lt = computeLongTermBias(ix); marketCtx.marketLongTerm = lt.bias; marketCtx.ltData = lt;
     marketCtx.lastRefresh = Date.now();
     renderMarket();
+    await registryRefreshContext().catch(function () {});
+    renderScreenerFromRegistry();
     $('mktStatus').textContent = '';
   } catch (e) {
     $('mktStatus').textContent = 'Error: ' + e.message;
@@ -1031,8 +1032,8 @@ function computeCardContext(s) {
 
 function buildCard(row) {
   var s = row.stock, matchedKeys = row.screenerKeys;
-  var ctx = row.context || computeCardContext(s);
-  scrIndex[s.ticker] = s;
+  var ctx = row.context || {};
+  // row.inShortlist is stamped by registrySyncShortlist() before every render
   var L = [];
   // Price · Open · Prev close
   var p = [];
@@ -1170,7 +1171,7 @@ function buildCard(row) {
       newsHostInner(s.ticker, s.tvSymbol, newsId, row.news) +
     '</div></div>';
 
-  var inList = shortlistHas(s.ticker);
+  var inList = !!row.inShortlist;
   var starBtn = '<button class="sl-star' + (inList ? ' on' : '') + '" data-sl-add="' + esc(s.ticker) + '">' +
     (inList ? '★ In list' : '☆ Shortlist') + '</button>';
 
@@ -1291,10 +1292,30 @@ function registryRefreshStale(liveTickerSet) {
   });
 }
 
+// Stamp row.inShortlist on every today's registry row from the in-memory
+// shortlistTodaySet. Called at the top of every renderScreenerFromRegistry so
+// the star state is always current without any live bypass.
+function registrySyncShortlist() {
+  regTodayRows().forEach(function (row) {
+    row.inShortlist = !!shortlistTodaySet[row.ticker];
+  });
+}
+
+// Re-snapshot computeCardContext for every today's registry row and save.
+// Called after any marketCtx change (market refresh, hot-state change) so
+// cards always reflect the latest sector / market bias from the registry.
+function registryRefreshContext() {
+  regTodayRows().forEach(function (row) {
+    if (row.stock) row.context = computeCardContext(row.stock);
+  });
+  return saveRegistry();
+}
+
 // Render the Screener result cards from today's registry rows (the only path
 // that fills #scrResults). Live candidates first, then by screeners matched,
 // then RVOL, then most-recently updated.
 function renderScreenerFromRegistry() {
+  registrySyncShortlist(); // stamp inShortlist from shortlist store before any card builds
   var rows = regTodayRows();
   rows.sort(function (a, b) {
     if (a.liveNow !== b.liveNow) return a.liveNow ? -1 : 1;
@@ -1509,7 +1530,8 @@ function toggleShortlist(ticker) {
   if (idx >= 0) {
     day.items.splice(idx, 1);
   } else {
-    var s = scrIndex[ticker] || {};
+    var regRow = registry[regId(ticker, key)];
+    var s = (regRow && regRow.stock) || {};
     day.items.push({
       ticker: ticker, tvSymbol: s.tvSymbol || '', price: s.price != null ? s.price : null,
       change: s.change != null ? s.change : null, sector: s.sector || '', addedAt: Date.now()
@@ -1654,7 +1676,10 @@ function initShortlist() {
         var i = day.items.findIndex(function (it) { return it.ticker === tk; });
         if (i >= 0) day.items.splice(i, 1);
         refreshShortlistCache();
-        saveShortlists().then(function () { renderShortlist(); });
+        saveShortlists().then(function () {
+          renderShortlist();
+          renderScreenerFromRegistry(); // re-stamps inShortlist via registrySyncShortlist inside
+        });
       }
       return;
     }
@@ -1679,10 +1704,8 @@ function initShortlistStars() {
     if (!btn) return;
     var ticker = btn.getAttribute('data-sl-add');
     toggleShortlist(ticker).then(function () {
-      var on = shortlistHas(ticker);
-      btn.classList.toggle('on', on);
-      btn.innerHTML = on ? '★ In list' : '☆ Shortlist';
       renderShortlist();
+      renderScreenerFromRegistry(); // registrySyncShortlist is called inside, re-stamps inShortlist
     });
   });
 }
@@ -1866,6 +1889,7 @@ function recomputeHotFromStore() {
   return reclassifyHot().then(function (out) {
     marketCtx.hotStatus = out;
     renderSectorBias(); renderHeatmap();
+    return registryRefreshContext().then(renderScreenerFromRegistry).catch(function () {});
   });
 }
 function initSettings() {
@@ -1895,6 +1919,7 @@ function initSettings() {
       if (marketCtx.lastRefresh) {
         return updateHotStates(marketCtx.sectorBiasScores).then(function (out) {
           marketCtx.hotStatus = out; renderSectorBias(); renderHeatmap();
+          return registryRefreshContext().then(renderScreenerFromRegistry).catch(function () {});
         });
       }
       marketCtx.hotStatus = {};
