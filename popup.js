@@ -143,7 +143,8 @@ var TV_COLUMNS = [
   'change_from_open', 'VWAP',
   'High.1M', 'Low.1M', 'high', 'low', 'ATR',
   'short_percentage_of_float', 'float_shares_outstanding',
-  'EMA9', 'EMA13', 'EMA20', 'EMA50', 'SMA5'
+  'EMA9', 'EMA13', 'EMA20', 'EMA50', 'SMA5',
+  'premarket_high', 'premarket_low'
 ];
 
 // The 3 screeners. Each runs its own filter set + sort against the scanner.
@@ -762,12 +763,18 @@ function renderBiasPanel() {
     row('long', 'LONG-TERM (200DMA)', lt, rowCls(lt), (lt !== 'UNKNOWN' ? '📈' : '⚪'), ltChip, (ltData && ltData.label) || '', (ltData ? '<div class="sig-note">' + esc(ltData.label) + '</div>' : ''), 'long') +
     '<div class="bias-foot">' + refreshStr + '</div>';
 
-  Array.prototype.forEach.call(host.querySelectorAll('.bias-head'), function (h) {
-    h.addEventListener('click', function () {
-      var k = h.parentNode.getAttribute('data-key');
-      _expanded[k] = !_expanded[k]; renderBiasPanel();
+  if (!host._delegated) {
+    host._delegated = true;
+    host.addEventListener('click', function (e) {
+      var head = e.target.closest && e.target.closest('.bias-head');
+      if (!head) return;
+      var biasRow = head.closest('[data-key]');
+      if (!biasRow) return;
+      var k = biasRow.getAttribute('data-key');
+      _expanded[k] = !_expanded[k];
+      renderBiasPanel();
     });
-  });
+  }
 }
 var _sbExpanded = {};
 function renderSectorBias() {
@@ -913,6 +920,14 @@ function mapTvRowToStock(item, screenerKey) {
   t = t.replace(/^.*:/, '').trim();
   var close = num(r['close']), change = num(r['change']);
   var cfo = num(r['change_from_open']);
+  var monthHigh = num(r['High.1M']), monthLow = num(r['Low.1M']);
+  var atr = num(r['ATR']);
+  var pmHigh = num(r['premarket_high']), pmLow = num(r['premarket_low']);
+  var pmRange = (pmHigh != null && pmLow != null) ? (pmHigh - pmLow) : null;
+  var adrPct = (atr != null && close != null && close > 0) ? (atr / close * 100) : null;
+  var monthRangePos = (monthHigh != null && monthLow != null && (monthHigh - monthLow) > 0 && close != null)
+    ? (close - monthLow) / (monthHigh - monthLow) * 100 : null;
+  var pmAdrRatio = (pmRange != null && atr != null && atr > 0) ? (pmRange / atr) : null;
   return {
     ticker: t, screenerKey: screenerKey || null, tvSymbol: String(item.s || ''),
     price: close, open: num(r['open']), change: change,
@@ -921,8 +936,10 @@ function mapTvRowToStock(item, screenerKey) {
     vwap: num(r['VWAP']),
     ema9: num(r['EMA9']), ema13: num(r['EMA13']), ema20: num(r['EMA20']), ema50: num(r['EMA50']),
     sma5: num(r['SMA5']),
-    monthHigh: num(r['High.1M']), monthLow: num(r['Low.1M']),
-    dayHigh: num(r['high']), dayLow: num(r['low']), atr: num(r['ATR']),
+    monthHigh: monthHigh, monthLow: monthLow,
+    dayHigh: num(r['high']), dayLow: num(r['low']), atr: atr,
+    pmHigh: pmHigh, pmLow: pmLow, pmRange: pmRange,
+    adrPct: adrPct, monthRangePos: monthRangePos, pmAdrRatio: pmAdrRatio,
     mcap: num(r['market_cap_basic']),
     floatShares: num(r['float_shares_outstanding']),
     shortFloat: num(r['short_percentage_of_float']),
@@ -1019,6 +1036,7 @@ function computeCardContext(s) {
   var broadResolved = resolveBroadSector(s);
   var sbScore = broadResolved && marketCtx.sectorBiasScores[broadResolved];
   var hotInfo = broadResolved && marketCtx.hotStatus && marketCtx.hotStatus[broadResolved];
+  var rg = regimeClassify(marketCtx.marketLongTerm, marketCtx.marketStage, marketCtx.marketBB, marketCtx.marketBias);
   return {
     themes: themes,
     broadResolved: broadResolved || null,
@@ -1026,7 +1044,13 @@ function computeCardContext(s) {
     secBias: (sbScore && sbScore.dir) || 'NEUTRAL',
     secScore: sbScore ? sbScore.score : null,
     secHot: !!(hotInfo && hotInfo.hot),
-    marketBias: marketCtx.marketBias || 'NEUTRAL'
+    marketBias: marketCtx.marketBias || 'NEUTRAL',
+    longTerm: marketCtx.marketLongTerm || 'UNKNOWN',
+    longTermLabel: (marketCtx.ltData && marketCtx.ltData.label) || '',
+    midTerm: marketCtx.marketStage || 'UNKNOWN',
+    midTermLabel: (marketCtx.stageData && marketCtx.stageData.stageLabel) || '',
+    shortTerm: marketCtx.marketBias || 'NEUTRAL',
+    regime: rg ? { slug: rg.slug, label: rg.label, icon: rg.icon, color: rg.color, stance: rg.stance, guidance: rg.guidance } : null
   };
 }
 
@@ -1081,6 +1105,14 @@ function buildCard(row) {
     }
     L.push('<div class="line">' + m + '</div>');
   }
+  // Monthly range position
+  if (s.monthRangePos != null) {
+    var pos = s.monthRangePos, distFromHigh = 100 - pos;
+    var posCol = pos >= 80 ? 'var(--amber)' : pos >= 50 ? 'var(--green-s)' : pos >= 20 ? 'var(--txt2)' : 'var(--red-s)';
+    var posLabel = pos >= 80 ? 'near high' : pos >= 50 ? 'upper half' : pos >= 20 ? 'lower half' : 'near low';
+    L.push('<div class="line"><b>Monthly position:</b> <span style="color:' + posCol + '">' + pos.toFixed(0) + '% into range</span>' +
+      ' <span class="sub9">(' + distFromHigh.toFixed(0) + '% below high · ' + posLabel + ')</span></div>');
+  }
   // Gap
   if (s.gapPct != null) {
     var gc = s.gapPct >= 0 ? 'pos' : 'neg', gd = s.gapPct >= 0 ? '▲ gap up' : '▼ gap down';
@@ -1122,6 +1154,26 @@ function buildCard(row) {
       }
     }
   }
+  // ADR% (ATR as % of price — average daily range)
+  if (s.adrPct != null) {
+    var adrCol = s.adrPct >= 5 ? 'var(--amber)' : s.adrPct >= 2 ? 'var(--green-s)' : 'var(--txt2)';
+    L.push('<div class="line"><b>ADR%:</b> <span style="color:' + adrCol + '">' + s.adrPct.toFixed(2) + '%</span>' +
+      ' <span class="sub9">(ATR ÷ price · avg daily range)</span></div>');
+  }
+  // PM range
+  if (s.pmRange != null) {
+    var pmRngCol = s.pmRange > 0 ? 'var(--txt)' : 'var(--muted)';
+    var pmDetail = (s.pmHigh != null && s.pmLow != null)
+      ? ' <span class="sub9">H $' + s.pmHigh.toFixed(2) + ' / L $' + s.pmLow.toFixed(2) + '</span>' : '';
+    L.push('<div class="line"><b>PM Range:</b> <span style="color:' + pmRngCol + '">$' + s.pmRange.toFixed(2) + '</span>' + pmDetail + '</div>');
+  }
+  // PM range / ADR ratio
+  if (s.pmAdrRatio != null) {
+    var parCol = s.pmAdrRatio >= 1 ? 'var(--amber)' : s.pmAdrRatio >= 0.5 ? 'var(--green-s)' : 'var(--muted)';
+    var parNote = s.pmAdrRatio >= 1 ? ' (PM > avg day range)' : s.pmAdrRatio >= 0.5 ? ' (PM = half day range)' : ' (PM < half day range)';
+    L.push('<div class="line"><b>PM / ADR:</b> <span style="color:' + parCol + '">' + s.pmAdrRatio.toFixed(2) + 'x</span>' +
+      '<span class="sub9">' + parNote + '</span></div>');
+  }
 
   var badges = (matchedKeys || [s.screenerKey]).map(function (k) { return '<span class="scr-badge">' + esc(SCREENERS[k].short) + '</span>'; }).join('');
   var chgCls = s.change >= 0 ? 'pos' : 'neg';
@@ -1157,11 +1209,26 @@ function buildCard(row) {
     : broadResolved
       ? esc(broad) + ' — ' + biasSpan(secBias) + secHot
       : esc(broad) + ' <span class="sub9">(no ETF proxy — not scored)</span>';
+  // Regime, long/mid/short term — all from registry context snapshot
+  var rg = ctx.regime || null;
+  var ltVal = ctx.longTerm || 'UNKNOWN', mtVal = ctx.midTerm || 'UNKNOWN', stVal = ctx.shortTerm || 'NEUTRAL';
+  var ltCol = ltVal === 'BULLISH' ? 'var(--green-s)' : ltVal === 'BEARISH' ? 'var(--red-s)' : ltVal === 'RECOVERING' || ltVal === 'WEAKENING' ? 'var(--amber)' : 'var(--muted)';
+  var mtCol = mtVal === 'UPTREND' ? 'var(--green-s)' : mtVal === 'DOWNTREND' ? 'var(--red-s)' : mtVal === 'PULLBACK' || mtVal === 'REBOUND' ? 'var(--amber)' : 'var(--muted)';
+  var stCol2 = stVal === 'BULLISH' ? 'var(--green-s)' : stVal === 'BEARISH' ? 'var(--red-s)' : 'var(--muted)';
+  var ltLine = '<div class="line"><b>Long term:</b> <span style="color:' + ltCol + '">' + esc(ltVal) + '</span>' +
+    (ctx.longTermLabel ? ' <span class="sub9">' + esc(ctx.longTermLabel) + '</span>' : '') + '</div>';
+  var mtLine = '<div class="line"><b>Mid term:</b> <span style="color:' + mtCol + '">' + esc(mtVal) + '</span>' +
+    (ctx.midTermLabel ? ' <span class="sub9">' + esc(ctx.midTermLabel) + '</span>' : '') + '</div>';
+  var stLine = '<div class="line"><b>Short term:</b> <span style="color:' + stCol2 + '">' + esc(stVal) + '</span></div>';
+  var rgLine = rg
+    ? '<div class="line"><b>Regime:</b> <span style="color:' + esc(rg.color) + '">' + esc(rg.icon) + ' ' + esc(rg.label) + '</span>' +
+      ' <span class="sub9">▶ ' + esc(rg.stance.replace(/_/g, ' ')) + ' — ' + esc(rg.guidance) + '</span></div>'
+    : '<div class="line"><b>Regime:</b> <span style="color:var(--muted)">—</span></div>';
   var ctxHtml = '<div class="ctx-block">' +
     '<div class="ctx-hdr">🌊 THEMES, SECTOR &amp; MARKET</div>' +
     '<div class="line"><b>Themes:</b> ' + themePills + '</div>' +
     '<div class="line"><b>Sector:</b> ' + sectorLine + '</div>' +
-    '<div class="line"><b>Market:</b> ' + biasSpan(ctx.marketBias) + '</div>' +
+    ltLine + mtLine + stLine + rgLine +
     '</div>';
 
   var newsId = 'news-' + String(s.ticker).replace(/[^A-Za-z0-9]/g, '');
@@ -1425,6 +1492,16 @@ var REG_COLUMNS = [
   { label: 'Sec score', get: function (r) { return r.context && r.context.secScore != null ? r.context.secScore : ''; } },
   { label: 'Hot sector', get: function (r) { return r.context && r.context.secHot ? 'hot' : ''; } },
   { label: 'Mkt bias', get: function (r) { return (r.context && r.context.marketBias) || ''; } },
+  { label: 'Long term', get: function (r) { return (r.context && r.context.longTerm) || ''; } },
+  { label: 'Mid term', get: function (r) { return (r.context && r.context.midTerm) || ''; } },
+  { label: 'Short term', get: function (r) { return (r.context && r.context.shortTerm) || ''; } },
+  { label: 'Regime', get: function (r) { return (r.context && r.context.regime && r.context.regime.label) || ''; } },
+  { label: 'PM High', get: function (r) { return regFix(r.stock.pmHigh); } },
+  { label: 'PM Low', get: function (r) { return regFix(r.stock.pmLow); } },
+  { label: 'PM Range', get: function (r) { return regFix(r.stock.pmRange); } },
+  { label: 'ADR%', get: function (r) { return regFix(r.stock.adrPct); } },
+  { label: 'Mth pos%', get: function (r) { return regFix(r.stock.monthRangePos, 0); } },
+  { label: 'PM/ADR', get: function (r) { return regFix(r.stock.pmAdrRatio); } },
   { label: 'News', get: function (r) {
       if (!r.news) return '';
       var n = (r.news.finnhub || []).length + (r.news.tradingview || []).length;
