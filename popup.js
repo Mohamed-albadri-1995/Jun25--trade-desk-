@@ -4344,6 +4344,104 @@ function jnl_renderWinSignalCard(trade) {
   return h;
 }
 
+function jnl_nearestSnapSlot(entryTs) {
+  if (!entryTs) return null;
+  var hhmm = jnl_fmtTime(entryTs);
+  var parts = hhmm.split(':');
+  var mins = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  var best = null, bestDiff = Infinity;
+  SNAPSHOT_SLOTS.forEach(function(slot) {
+    var sp = slot.split(':');
+    var sm = parseInt(sp[0]) * 60 + parseInt(sp[1]);
+    var diff = Math.abs(mins - sm);
+    if (diff < bestDiff) { bestDiff = diff; best = slot; }
+  });
+  return best;
+}
+
+function jnl_buildMktCtxHtml(trade, daySnaps) {
+  var regKey = trade.ticker + '|' + trade.date;
+  var regEntry = registry[regKey];
+  var stock = regEntry && regEntry.stock;
+  var ctx = regEntry && regEntry.context;
+  var themes = (ctx && ctx.themes && ctx.themes.length) ? ctx.themes
+    : themesForTicker(trade.ticker, stock && stock.industry);
+  var broadSector = stock ? resolveBroadSector(stock) : null;
+  var slot = jnl_nearestSnapSlot(trade.entryTs);
+  var snap = slot && daySnaps && daySnaps[slot];
+  if (!themes.length && !broadSector && !snap) return '';
+  var h = '<div style="background:#0a1628;border:1px solid #1e3a5f;border-radius:8px;padding:10px 12px;margin-top:8px">';
+  h += '<div style="color:#3b82f6;font-size:10px;font-weight:700;letter-spacing:0.1em;margin-bottom:8px">THEMES, SECTOR &amp; MARKET';
+  if (slot) h += ' <span style="font-weight:400;color:#475569">· snapshot: ' + slot + ' ET</span>';
+  h += '</div>';
+  if (themes.length) {
+    h += '<div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">';
+    h += '<span style="font-size:9px;color:#475569;font-weight:600;letter-spacing:0.08em;margin-right:2px">THEMES</span>';
+    themes.forEach(function(theme) {
+      h += '<span style="font-size:9px;background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af44;padding:1px 7px;border-radius:4px">' + htmlEscape(theme) + '</span>';
+    });
+    h += '</div>';
+  }
+  if (broadSector) {
+    var secData = snap && snap.sectors && snap.sectors[broadSector];
+    var secBias = secData ? secData.bias : (ctx && ctx.secBias) || null;
+    var secScore = secData ? secData.score : (ctx && ctx.secScore != null ? ctx.secScore : null);
+    var biasColor = secBias === 'BULLISH' ? '#4ade80' : secBias === 'BEARISH' ? '#f87171' : '#94a3b8';
+    h += '<div style="margin-bottom:6px;display:flex;align-items:center;gap:8px">';
+    h += '<span style="font-size:9px;color:#475569;font-weight:600;letter-spacing:0.08em">SECTOR</span>';
+    h += '<span style="font-size:11px;color:#e2e8f0;font-weight:600">' + htmlEscape(broadSector) + '</span>';
+    if (secBias) h += '<span style="font-size:10px;font-weight:700;color:' + biasColor + '">' + htmlEscape(secBias) + '</span>';
+    if (secScore != null) h += '<span style="font-size:9px;color:#475569">score: ' + Number(secScore).toFixed(1) + '</span>';
+    h += '</div>';
+  }
+  if (snap && snap.complete !== false) {
+    var lt = snap.longTerm, mt = snap.midTerm, st = snap.shortTerm;
+    function biasPill(lbl, val) {
+      if (!val) return '';
+      var c = val === 'BULLISH' ? '#4ade80' : val === 'BEARISH' ? '#f87171' : '#94a3b8';
+      var bg = val === 'BULLISH' ? '#0a2e1a' : val === 'BEARISH' ? '#2e0f0f' : '#1e293b';
+      return '<div style="display:flex;flex-direction:column;align-items:center;gap:2px">' +
+        '<span style="font-size:8px;color:#475569;font-weight:600">' + lbl + '</span>' +
+        '<span style="font-size:10px;font-weight:700;color:' + c + ';background:' + bg + ';padding:2px 8px;border-radius:4px">' + htmlEscape(val) + '</span>' +
+        '</div>';
+    }
+    h += '<div style="display:flex;gap:12px;margin-bottom:6px">';
+    if (lt) h += biasPill('LONG TERM', lt.result);
+    if (mt) h += biasPill('MID TERM', mt.result);
+    if (st) h += biasPill('SHORT TERM', st.result);
+    h += '</div>';
+    var rg = snap.regime;
+    if (rg && rg.slug) {
+      var rgDef = REGIME_CATALOG[rg.slug];
+      var rgColor = rgDef ? rgDef.color : '#94a3b8';
+      h += '<div style="background:#0f172a;border:1px solid ' + rgColor + '33;border-radius:6px;padding:6px 8px">';
+      h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">';
+      h += '<span style="font-size:13px">' + htmlEscape(rg.icon || '') + '</span>';
+      h += '<span style="font-size:11px;font-weight:700;color:' + rgColor + '">' + htmlEscape(rg.label || rg.slug) + '</span>';
+      if (rg.stance) h += '<span style="font-size:10px;color:#94a3b8;background:#1e293b;padding:1px 6px;border-radius:3px">' + htmlEscape(rg.stance) + '</span>';
+      h += '</div>';
+      if (rg.guidance) h += '<div style="font-size:10px;color:#64748b">' + htmlEscape(rg.guidance) + '</div>';
+      h += '</div>';
+    }
+  } else if (slot) {
+    h += '<div style="font-size:10px;color:#475569">No complete snapshot for ' + slot + ' ET on ' + htmlEscape(trade.date) + '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function jnl_populateMktCtxCards(trades) {
+  if (!trades || !trades.length) return;
+  storageGet(['marketSnapshots']).then(function(r) {
+    var allSnaps = r.marketSnapshots || {};
+    trades.forEach(function(t) {
+      var el = document.getElementById('jnl-mktctx-' + t.id);
+      if (!el) return;
+      el.innerHTML = jnl_buildMktCtxHtml(t, allSnaps[t.date] || {});
+    });
+  });
+}
+
 function jnl_renderCard(trade) {
   var isWin = trade.netPnl !== null && trade.netPnl > 0;
   var isLoss = trade.netPnl !== null && trade.netPnl < 0;
@@ -4353,7 +4451,7 @@ function jnl_renderCard(trade) {
   var setupChip = trade.snapshot || trade.setup ? jnl_renderSetupChip(trade) : "";
   var gradeChip = jnl_renderTradeGrade(jnl_gradeTrade(trade, __jnlCorrelations));
   var qualityBar = trade.entryQuality !== null && trade.entryQuality !== undefined ? '<div style="margin-top:6px;font-size:10px;color:#475569">Entry quality: ' + jnl_renderEntryQualityBar(trade.entryQuality) + "</div>" : "";
-  return '<div class="jnl-card" data-trade-id="' + trade.id + '" style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:12px 14px;margin-bottom:8px">' + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:4px">' + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' + '<span style="font-size:16px;font-weight:700;color:#e2e8f0">' + trade.ticker + "</span>" + '<span style="font-size:11px;font-weight:600;color:' + sideColor + ";background:" + sideColor + '1a;padding:2px 7px;border-radius:4px">' + sideLabel + "</span>" + (trade.open ? '<span style="font-size:10px;color:#f59e0b;background:#f59e0b1a;padding:2px 6px;border-radius:4px">OPEN</span>' : "") + setupChip + gradeChip + (trade.account ? '<span style="font-size:9px;color:#93c5fd;background:#1e3a5f55;border:1px solid #1e40af66;padding:1px 6px;border-radius:3px">' + trade.account + "</span>" : "") + (trade.source ? '<span style="font-size:9px;color:#64748b;background:#1e293b;border:1px solid #334155;padding:1px 6px;border-radius:3px">' + trade.source + "</span>" : "") + "</div>" + '<div style="display:flex;align-items:center;gap:8px">' + '<span style="font-size:13px;font-weight:700;color:' + pnlColor + '">' + jnl_fmt$(trade.netPnl) + "</span>" + '<span style="font-size:11px;color:' + pnlColor + '">' + jnl_fmtPct(trade.pctMove) + "</span>" + '<button class="jnl-chart-btn btn" data-trade-id="' + trade.id + '" style="font-size:11px;padding:3px 9px;background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af">📈 Chart</button>' + '<button class="jnl-del-btn" data-trade-id="' + trade.id + '" title="Delete this trade" style="font-size:11px;padding:3px 7px;background:#1e293b;color:#64748b;border:1px solid #334155;border-radius:6px;cursor:pointer">🗑</button>' + "</div>" + "</div>" + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px 10px;font-size:11px">' + jnl_stat("Date", trade.date) + jnl_stat("Entry", trade.entryPrice ? "$" + trade.entryPrice.toFixed(2) : "—") + jnl_stat("Exit", trade.exitPrice ? "$" + trade.exitPrice.toFixed(2) : "—") + jnl_stat("Shares", trade.shares ? trade.shares.toLocaleString() : "—") + jnl_stat("In", jnl_fmtTime(trade.entryTs)) + jnl_stat("Out", jnl_fmtTime(trade.exitTs)) + jnl_stat("Duration", jnl_fmtDur(trade.durationMs)) + jnl_stat("Gross", jnl_fmt$(trade.grossPnl)) + jnl_stat("Comm" + (trade.commSource && trade.commSource !== "csv" ? " ·profile" : ""), trade.totalComm ? "-$" + trade.totalComm.toFixed(2) : "—") + jnl_stat("Net P&L", trade.netPnl !== null ? jnl_fmt$(trade.netPnl) : "—", pnlColor) + "</div>" + qualityBar + jnl_renderWinSignalCard(trade) + jnl_renderSnapshotCard(trade) + '<div id="jnl-exit-row-' + trade.id + '">' + (trade.exitAnalysis ? jnl_renderExitRow(trade.exitAnalysis, trade) : "") + "</div>" + (trade.checklistRecord && trade.checklistRecord.length ? '<button class="jnl-record-btn btn" data-trade-id="' + trade.id + '" style="margin-top:8px;font-size:10px;padding:3px 9px;background:#1e293b;color:#94a3b8;border:1px solid #334155">📋 Trade Record</button>' + '<div id="jnl-record-' + trade.id + '" style="display:none">' + jnl_renderTradeRecord(trade) + "</div>" : "") + "</div>";
+  return '<div class="jnl-card" data-trade-id="' + trade.id + '" style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:12px 14px;margin-bottom:8px">' + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:4px">' + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' + '<span style="font-size:16px;font-weight:700;color:#e2e8f0">' + trade.ticker + "</span>" + '<span style="font-size:11px;font-weight:600;color:' + sideColor + ";background:" + sideColor + '1a;padding:2px 7px;border-radius:4px">' + sideLabel + "</span>" + (trade.open ? '<span style="font-size:10px;color:#f59e0b;background:#f59e0b1a;padding:2px 6px;border-radius:4px">OPEN</span>' : "") + setupChip + gradeChip + (trade.account ? '<span style="font-size:9px;color:#93c5fd;background:#1e3a5f55;border:1px solid #1e40af66;padding:1px 6px;border-radius:3px">' + trade.account + "</span>" : "") + (trade.source ? '<span style="font-size:9px;color:#64748b;background:#1e293b;border:1px solid #334155;padding:1px 6px;border-radius:3px">' + trade.source + "</span>" : "") + "</div>" + '<div style="display:flex;align-items:center;gap:8px">' + '<span style="font-size:13px;font-weight:700;color:' + pnlColor + '">' + jnl_fmt$(trade.netPnl) + "</span>" + '<span style="font-size:11px;color:' + pnlColor + '">' + jnl_fmtPct(trade.pctMove) + "</span>" + '<button class="jnl-chart-btn btn" data-trade-id="' + trade.id + '" style="font-size:11px;padding:3px 9px;background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af">📈 Chart</button>' + '<button class="jnl-del-btn" data-trade-id="' + trade.id + '" title="Delete this trade" style="font-size:11px;padding:3px 7px;background:#1e293b;color:#64748b;border:1px solid #334155;border-radius:6px;cursor:pointer">🗑</button>' + "</div>" + "</div>" + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px 10px;font-size:11px">' + jnl_stat("Date", trade.date) + jnl_stat("Entry", trade.entryPrice ? "$" + trade.entryPrice.toFixed(2) : "—") + jnl_stat("Exit", trade.exitPrice ? "$" + trade.exitPrice.toFixed(2) : "—") + jnl_stat("Shares", trade.shares ? trade.shares.toLocaleString() : "—") + jnl_stat("In", jnl_fmtTime(trade.entryTs)) + jnl_stat("Out", jnl_fmtTime(trade.exitTs)) + jnl_stat("Duration", jnl_fmtDur(trade.durationMs)) + jnl_stat("Gross", jnl_fmt$(trade.grossPnl)) + jnl_stat("Comm" + (trade.commSource && trade.commSource !== "csv" ? " ·profile" : ""), trade.totalComm ? "-$" + trade.totalComm.toFixed(2) : "—") + jnl_stat("Net P&L", trade.netPnl !== null ? jnl_fmt$(trade.netPnl) : "—", pnlColor) + "</div>" + qualityBar + jnl_renderWinSignalCard(trade) + jnl_renderSnapshotCard(trade) + '<div id="jnl-exit-row-' + trade.id + '">' + (trade.exitAnalysis ? jnl_renderExitRow(trade.exitAnalysis, trade) : "") + "</div>" + (trade.checklistRecord && trade.checklistRecord.length ? '<button class="jnl-record-btn btn" data-trade-id="' + trade.id + '" style="margin-top:8px;font-size:10px;padding:3px 9px;background:#1e293b;color:#94a3b8;border:1px solid #334155">📋 Trade Record</button>' + '<div id="jnl-record-' + trade.id + '" style="display:none">' + jnl_renderTradeRecord(trade) + "</div>" : "") + '<div id="jnl-mktctx-' + trade.id + '"></div>' + "</div>";
 }
 
 function jnl_renderTradeRecord(trade) {
@@ -4564,6 +4662,7 @@ function jnl_renderList() {
   }
   container.innerHTML = viewBar + cardsHtml;
   jnl_wireCardButtons();
+  jnl_populateMktCtxCards(trades);
   jnl_renderStatsBar(scoped);
   jnl_renderAccountStats(scoped);
   jnl_renderSetupStatsSection(scoped);
