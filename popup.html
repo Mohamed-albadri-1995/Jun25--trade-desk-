@@ -518,6 +518,23 @@
       <input type="file" id="reg2ImportCsvFile" accept=".csv" style="display:none">
     </div>
 
+    <!-- ── Register 3: EOD Outcome ── -->
+    <div class="section">
+      <div class="section-hdr">📈 Register 3 — EOD Outcome</div>
+      <div class="reg-note">Per-stock outcome collected after market close. Entry price = open of the 9:40 ET candle (Yahoo 1-min). ATR from Register 1. HH/LL = session high/low from 9:40–16:00 ET. Auto-fetches at 16:05 ET in auto mode.</div>
+      <div id="eodOutcomeView"></div>
+      <div class="snap-io-bar">
+        <button class="btn btn-ghost" id="reg3RunEod">▶ Run Now</button>
+        <button class="btn btn-ghost" id="reg3ExportJson">⬇ Backup JSON</button>
+        <button class="btn btn-ghost" id="reg3ImportJson">⬆ Restore JSON</button>
+        <button class="btn btn-ghost" id="reg3ExportCsv">⬇ Export CSV</button>
+        <button class="btn btn-ghost" id="reg3ImportCsv">⬆ Import CSV</button>
+        <span id="reg3IoStatus" class="snap-io-status"></span>
+      </div>
+      <input type="file" id="reg3ImportJsonFile" accept=".json" style="display:none">
+      <input type="file" id="reg3ImportCsvFile" accept=".csv" style="display:none">
+    </div>
+
   </div>
 
   <!-- ════════════════════ SHORTLIST ════════════════════ -->

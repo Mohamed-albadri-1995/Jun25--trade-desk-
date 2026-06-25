@@ -1268,11 +1268,49 @@ function renderMarketSnapshotsView() {
   });
 }
 
+function renderEodOutcomeView() {
+  var el = $('eodOutcomeView'); if (!el) return;
+  storageGet(['eodOutcome']).then(function (r) {
+    var all = r.eodOutcome || {};
+    var today = etDateStr();
+    var entry = all[today];
+    if (!entry || !entry.rows || !Object.keys(entry.rows).length) {
+      el.innerHTML = '<div class="empty" style="padding:12px;color:var(--muted)">No EOD outcomes for today yet. Auto-fetches at 16:05 ET, or click <b>Run Now</b> after market close.</div>';
+      return;
+    }
+    var rows = Object.keys(entry.rows).map(function (t) { return entry.rows[t]; });
+    rows.sort(function (a, b) {
+      var ua = a.upR != null ? a.upR : -Infinity, ub = b.upR != null ? b.upR : -Infinity;
+      return ub - ua;
+    });
+    var html = '<div class="snap-table-wrap"><table class="reg-table">';
+    html += '<tr><th>Ticker</th><th>Entry @ 9:40</th><th>ATR (R1)</th><th>Day HH</th><th>Day LL</th><th>(Entry-LL)/ATR</th><th>(HH-Entry)/ATR</th><th>Status</th></tr>';
+    rows.forEach(function (row) {
+      var f2 = function (v) { return v != null && isFinite(v) ? Number(v).toFixed(2) : '—'; };
+      html += '<tr>';
+      html += '<td style="color:#4ade80;font-weight:600">' + esc(row.ticker || '') + '</td>';
+      html += '<td>' + f2(row.entry) + '</td>';
+      html += '<td>' + f2(row.atr) + '</td>';
+      html += '<td>' + f2(row.hh) + '</td>';
+      html += '<td>' + f2(row.ll) + '</td>';
+      html += '<td>' + f2(row.downR) + '</td>';
+      html += '<td style="' + (row.upR != null && row.upR > 1 ? 'color:#4ade80' : '') + '">' + f2(row.upR) + '</td>';
+      html += '<td style="color:var(--muted)">' + esc(row.status || '') + '</td>';
+      html += '</tr>';
+    });
+    html += '</table></div>';
+    html += '<div class="reg-note" style="margin-top:6px">Captured ' + esc(entry.capturedAt || '') + ' ET · ';
+    html += rows.length + ' stocks' + (!entry.complete ? ' · ⚠ incomplete' : '') + '</div>';
+    el.innerHTML = html;
+  });
+}
+
 function renderAllRegisters() {
   renderSnapshotBar();
   renderFreezeBtn();
   renderFrozenScreenerView();
   renderMarketSnapshotsView();
+  renderEodOutcomeView();
 }
 
 // ── Register import / export ──────────────────────────────────────────
@@ -1676,6 +1714,94 @@ function importMarketSnapshotsCsv(file) {
   };
   reader.readAsText(file);
 }
+// ── Register 3 — EOD Outcome ──────────────────────────────────────────
+function exportEodOutcomeJson() {
+  storageGet(['eodOutcome']).then(function (r) {
+    var all = r.eodOutcome || {};
+    if (!Object.keys(all).length) { setIoStatus('reg3IoStatus', '⚠ No EOD outcome data to export'); return; }
+    downloadJSON({ _type: 'eodOutcome', _exported: new Date().toISOString(), data: all },
+      'eod-outcome-backup.json');
+    setIoStatus('reg3IoStatus', '✅ Backup: eod-outcome-backup.json (' + Object.keys(all).length + ' day(s))');
+  });
+}
+
+function importEodOutcomeJson(file) {
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      var raw = JSON.parse(e.target.result);
+      var incoming = (raw._type === 'eodOutcome' && raw.data) ? raw.data : raw;
+      if (typeof incoming !== 'object' || !Object.keys(incoming).length)
+        { setIoStatus('reg3IoStatus', '⚠ Invalid file structure'); return; }
+      storageGet(['eodOutcome']).then(function (r) {
+        var store = r.eodOutcome || {};
+        Object.assign(store, incoming);
+        storageSet({ eodOutcome: store }).then(function () {
+          renderEodOutcomeView();
+          setIoStatus('reg3IoStatus', '✅ Restored ' + Object.keys(incoming).length + ' day(s)');
+        });
+      });
+    } catch (err) { setIoStatus('reg3IoStatus', '⚠ Parse error: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+var EOD_CSV_HEADERS = ['date','ticker','entry','atr','hh','ll','down_r','up_r','status','fetched_at'];
+function exportEodOutcomeCsv() {
+  var date = etDateStr();
+  storageGet(['eodOutcome']).then(function (r) {
+    var entry = (r.eodOutcome || {})[date];
+    if (!entry || !entry.rows || !Object.keys(entry.rows).length)
+      { setIoStatus('reg3IoStatus', '⚠ No EOD data for today'); return; }
+    var rows = Object.keys(entry.rows).map(function (t) {
+      var row = entry.rows[t];
+      var n = function (v) { return v != null && isFinite(v) ? Number(v).toFixed(4) : ''; };
+      return {
+        date: date, ticker: t,
+        entry: n(row.entry), atr: n(row.atr),
+        hh: n(row.hh), ll: n(row.ll),
+        down_r: n(row.downR), up_r: n(row.upR),
+        status: row.status || '',
+        fetched_at: row.fetchedAt ? fmtETTime(row.fetchedAt) : ''
+      };
+    });
+    downloadCSV(buildCSV(EOD_CSV_HEADERS, rows), 'eod-outcome-' + date + '.csv');
+    setIoStatus('reg3IoStatus', '✅ CSV: eod-outcome-' + date + '.csv (' + rows.length + ' stocks)');
+  });
+}
+
+function importEodOutcomeCsv(file) {
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      var rows = parseCSV(e.target.result);
+      if (!rows.length || !rows[0].ticker) { setIoStatus('reg3IoStatus', '⚠ No ticker column found'); return; }
+      var date = rows[0].date || etDateStr();
+      var pf = function (v) { return v !== '' && v != null ? parseFloat(v) : null; };
+      var resultRows = {};
+      rows.forEach(function (row) {
+        if (!row.ticker) return;
+        resultRows[row.ticker] = {
+          ticker: row.ticker, entry: pf(row.entry), atr: pf(row.atr),
+          hh: pf(row.hh), ll: pf(row.ll),
+          downR: pf(row.down_r), upR: pf(row.up_r),
+          status: row.status || 'imported', fetchedAt: Date.now()
+        };
+      });
+      if (!Object.keys(resultRows).length) { setIoStatus('reg3IoStatus', '⚠ No valid rows found'); return; }
+      storageGet(['eodOutcome']).then(function (r) {
+        var store = r.eodOutcome || {};
+        store[date] = { rows: resultRows, capturedAt: etTimeStr(), complete: true };
+        storageSet({ eodOutcome: store }).then(function () {
+          renderEodOutcomeView();
+          setIoStatus('reg3IoStatus', '✅ Imported ' + Object.keys(resultRows).length + ' stocks for ' + date);
+        });
+      });
+    } catch (err) { setIoStatus('reg3IoStatus', '⚠ Parse error: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
 function initRegisterIO() {
   function wire(exportId, exportFn, importId, fileId, importFn) {
     var exBtn = $(exportId); if (exBtn) exBtn.addEventListener('click', exportFn);
@@ -1689,6 +1815,20 @@ function initRegisterIO() {
   wire('reg1ExportCsv',  exportFrozenScreenerCsv,  'reg1ImportCsv',  'reg1ImportCsvFile',  importFrozenScreenerCsv);
   wire('reg2ExportJson', exportMarketSnapshotsJson, 'reg2ImportJson', 'reg2ImportJsonFile', importMarketSnapshotsJson);
   wire('reg2ExportCsv',  exportMarketSnapshotsCsv,  'reg2ImportCsv',  'reg2ImportCsvFile',  importMarketSnapshotsCsv);
+
+  wire('reg3ExportJson', exportEodOutcomeJson, 'reg3ImportJson', 'reg3ImportJsonFile', importEodOutcomeJson);
+  wire('reg3ExportCsv',  exportEodOutcomeCsv,  'reg3ImportCsv',  'reg3ImportCsvFile',  importEodOutcomeCsv);
+
+  var runBtn = $('reg3RunEod');
+  if (runBtn) {
+    runBtn.addEventListener('click', function () {
+      setIoStatus('reg3IoStatus', '⏳ Fetching intraday data for all Register 1 stocks…');
+      chrome.runtime.sendMessage({ action: 'runEodOutcome', date: etDateStr() }, function (resp) {
+        if (chrome.runtime.lastError) setIoStatus('reg3IoStatus', '⚠ ' + chrome.runtime.lastError.message);
+        else if (resp && !resp.ok) setIoStatus('reg3IoStatus', '⚠ ' + (resp.error || 'Unknown error'));
+      });
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2862,6 +3002,10 @@ document.addEventListener('DOMContentLoaded', function () {
           renderRegistryTable();
           autoFetchNewsQueue(regTodayRows());
         });
+      }
+      if (msg.type === 'EOD_OUTCOME_COMPLETE') {
+        renderEodOutcomeView();
+        setIoStatus('reg3IoStatus', msg.error ? ('⚠ ' + msg.error) : '✅ EOD outcomes ready');
       }
     });
   }

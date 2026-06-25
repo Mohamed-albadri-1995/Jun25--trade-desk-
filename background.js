@@ -741,6 +741,7 @@ function bg_runScreener(key) {
 
 // Run all 3 screeners, upsert results into registry storage.
 var bg_preScanDoneDate = null;
+var bg_eodOutcomeDoneDate = null;
 async function bg_preScan() {
   var today = bg_etDateStr(), now = Date.now();
   try {
@@ -838,6 +839,89 @@ async function bg_buildAndSaveFrozenScreener(slot) {
   });
 }
 
+// ── Register 3: EOD Outcome ───────────────────────────────────────────────
+
+async function bg_fetchYahooIntraday(sym) {
+  var hosts = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+  var path = '/v8/finance/chart/' + yahooSymbol(sym) + '?range=1d&interval=1m&includePrePost=false';
+  var fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
+  for (var i = 0; i < hosts.length; i++) {
+    try {
+      var resp = await fetch('https://' + hosts[i] + path);
+      if (!resp.ok) continue;
+      var j = await resp.json();
+      var res = j && j.chart && j.chart.result && j.chart.result[0];
+      var ts = res && res.timestamp;
+      var q = res && res.indicators && res.indicators.quote && res.indicators.quote[0];
+      if (!ts || !q) continue;
+      var bars = [];
+      for (var k = 0; k < ts.length; k++) {
+        var o = q.open[k], h = q.high[k], l = q.low[k], c = q.close[k];
+        if (o == null || h == null || l == null || c == null) continue;
+        bars.push({ hhmm: fmt.format(new Date(ts[k] * 1000)), open: +o, high: +h, low: +l, close: +c });
+      }
+      if (bars.length) return bars;
+    } catch (e) {}
+  }
+  return null;
+}
+
+async function bg_runEodOutcome(date) {
+  var r = await bg_storageGet(['frozenScreener', 'eodOutcome']);
+  var frozen = (r.frozenScreener || {})[date];
+  if (!frozen || !frozen.rows || !Object.keys(frozen.rows).length) {
+    try { chrome.runtime.sendMessage({ type: 'EOD_OUTCOME_COMPLETE', date: date, error: 'No Register 1 data for ' + date }, function () { if (chrome.runtime.lastError) {} }); } catch (_) {}
+    return;
+  }
+  var store = r.eodOutcome || {};
+  if (!store[date]) store[date] = { rows: {}, capturedAt: bg_etTimeStr(), complete: false };
+  var tickers = Object.keys(frozen.rows);
+  for (var i = 0; i < tickers.length; i++) {
+    var ticker = tickers[i];
+    var frozenRow = frozen.rows[ticker];
+    var atr = (frozenRow.stock && frozenRow.stock.atr != null) ? +frozenRow.stock.atr : null;
+    if (i > 0) await new Promise(function (res) { setTimeout(res, 600); });
+    var bars = await bg_fetchYahooIntraday(ticker);
+    if (!bars || !bars.length) {
+      store[date].rows[ticker] = { ticker: ticker, atr: atr, status: 'no_data', fetchedAt: Date.now() };
+      continue;
+    }
+    var entryBar = null;
+    for (var b = 0; b < bars.length; b++) {
+      if (bars[b].hhmm >= '09:40') { entryBar = bars[b]; break; }
+    }
+    if (!entryBar) {
+      store[date].rows[ticker] = { ticker: ticker, atr: atr, status: 'no_940_bar', fetchedAt: Date.now() };
+      continue;
+    }
+    var entryPrice = entryBar.open;
+    var hh = -Infinity, ll = Infinity;
+    for (var b = 0; b < bars.length; b++) {
+      var bar = bars[b];
+      if (bar.hhmm < '09:40' || bar.hhmm > '16:00') continue;
+      if (bar.high > hh) hh = bar.high;
+      if (bar.low < ll) ll = bar.low;
+    }
+    hh = hh === -Infinity ? null : hh;
+    ll = ll === Infinity ? null : ll;
+    store[date].rows[ticker] = {
+      ticker: ticker,
+      entry: entryPrice,
+      atr: atr,
+      hh: hh,
+      ll: ll,
+      downR: (atr && ll != null) ? (entryPrice - ll) / atr : null,
+      upR:   (atr && hh != null) ? (hh - entryPrice)  / atr : null,
+      fetchedAt: Date.now(),
+      status: 'ok'
+    };
+  }
+  store[date].complete = true;
+  store[date].capturedAt = bg_etTimeStr();
+  await bg_storageSet({ eodOutcome: store });
+  try { chrome.runtime.sendMessage({ type: 'EOD_OUTCOME_COMPLETE', date: date }, function () { if (chrome.runtime.lastError) {} }); } catch (_) {}
+}
+
 function setupSnapshotAlarms() {
   chrome.alarms.get('snapshotCheck', function (existing) {
     if (!existing) chrome.alarms.create('snapshotCheck', { periodInMinutes: 1 });
@@ -862,6 +946,15 @@ chrome.alarms.onAlarm.addListener(async function (alarm) {
     if (bg_preScanDoneDate !== today) {
       bg_preScanDoneDate = today;
       await bg_preScan();
+    }
+  }
+
+  // 16:05 ET: collect EOD outcome for all Register 1 tickers via Yahoo 1-min data.
+  if (hhmm === '16:05') {
+    var today2 = bg_etDateStr();
+    if (bg_eodOutcomeDoneDate !== today2) {
+      bg_eodOutcomeDoneDate = today2;
+      bg_runEodOutcome(today2);
     }
   }
 
@@ -906,6 +999,14 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     var range = (msg.range === '3mo' || msg.range === '6mo') ? msg.range : '6mo';
     fetchDeskHistory(msg.symbol, range)
       .then(function (out) { sendResponse({ ok: true, bars: out.bars, source: out.source }); })
+      .catch(function (e) { sendResponse({ ok: false, error: e.message }); });
+    return true;
+  }
+
+  // Register 3: EOD outcome — fetch intraday data + compute metrics
+  if (msg.action === 'runEodOutcome') {
+    bg_runEodOutcome(msg.date || bg_etDateStr())
+      .then(function () { sendResponse({ ok: true }); })
       .catch(function (e) { sendResponse({ ok: false, error: e.message }); });
     return true;
   }
