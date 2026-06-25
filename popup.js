@@ -1117,18 +1117,20 @@ function renderSnapshotBar() {
   var today = etDateStr();
   loadMarketSnapshots(today).then(function (snaps) {
     var isAuto = settings.snapshotMode === 'auto';
-    var activeSlot = isAuto ? null : getActiveSlot();
+    var activeSlot = getActiveSlot();
     var chips = SNAPSHOT_SLOTS.map(function (slot) {
       var s = snaps[slot];
-      if (s && s.complete) return '<span class="snap-chip ok" title="Captured ' + esc(s.capturedAt) + '">✅ ' + slot + '</span>';
-      if (s && !s.complete) return '<span class="snap-chip warn" title="' + esc(s.reason) + '">⚠ ' + slot + '</span>';
-      if (!isAuto && slot === activeSlot) return '<button class="btn btn-sm snap-btn" data-slot="' + slot + '">📸 ' + slot + '</button>';
-      return '<span class="snap-chip na">— ' + slot + '</span>';
+      if (s && s.complete) return '<span class="snap-chip done" title="Captured ' + esc(s.capturedAt) + '">✅ ' + slot + '</span>';
+      if (s && !s.complete) return '<span class="snap-chip partial" title="' + esc(s.reason) + '">⚠ ' + slot + '</span>';
+      if (isAuto) return '<span class="snap-chip" title="Auto mode — will capture within ±5 min">— ' + slot + '</span>';
+      // manual: always show a button; highlight if within the ±5 min window
+      var cls = slot === activeSlot ? ' active' : '';
+      return '<button class="snap-chip' + cls + '" data-slot="' + slot + '">📸 ' + slot + '</button>';
     });
-    var modeTag = '<span class="snap-mode-tag">' + (isAuto ? '🤖 Auto' : '👆 Manual') + '</span>';
+    var modeTag = '<span style="font-size:10px;color:var(--muted);font-weight:700">' + (isAuto ? '🤖 Auto' : '👆 Manual') + '</span>';
     el.innerHTML = '<div class="snap-bar">' + modeTag + chips.join('') + '</div>';
     if (!isAuto) {
-      var btns = el.querySelectorAll('.snap-btn');
+      var btns = el.querySelectorAll('[data-slot]');
       Array.prototype.forEach.call(btns, function (btn) {
         btn.addEventListener('click', function () { doMarketSnapshot(btn.getAttribute('data-slot')); });
       });
@@ -1151,7 +1153,7 @@ function renderFreezeBtn() {
   var today = etDateStr();
   loadFrozenScreener(today).then(function (entry) {
     if (entry && entry.complete) {
-      el.innerHTML = '<div class="snap-status ok">✅ Screener frozen ' + esc(entry.capturedAt) + '</div>'; return;
+      el.innerHTML = '<div class="snap-status ok">✅ Screener frozen at ' + esc(entry.capturedAt) + ' (slot ' + esc(entry.slot || '09:35') + ')</div>'; return;
     }
     if (settings.snapshotMode === 'auto') {
       el.innerHTML = entry
@@ -1159,16 +1161,13 @@ function renderFreezeBtn() {
         : '<div class="snap-status muted">🤖 Auto mode — screener freezes at 09:35 if scan ran today</div>';
       return;
     }
+    // manual: always show the button; note the ideal window if outside it
     var activeSlot = getActiveSlot();
     var inWindow = activeSlot === '09:35';
-    if (!inWindow && !entry) {
-      el.innerHTML = '<div class="snap-status muted">📸 Freeze window: 09:30–09:40 ET</div>'; return;
-    }
-    var retryLabel = entry ? '📸 Retry freeze → ' + (activeSlot || '09:35') : '📸 Freeze Screener → ' + (activeSlot || '09:35');
-    var statusLine = entry ? '<div class="snap-status warn">⚠ Last attempt: ' + esc(entry.reason) + '</div>' : '';
-    el.innerHTML = statusLine + (inWindow
-      ? '<button class="btn btn-primary btn-sm" id="freezeBtn">' + retryLabel + '</button>'
-      : '<div class="snap-status muted">Window closed — retry opens 09:30 ET</div>');
+    var label = entry ? '📸 Retry Freeze Screener' : '📸 Freeze Screener → 09:35';
+    var windowNote = inWindow ? '' : '<div style="font-size:10px;color:var(--muted);margin-top:3px">Best captured 09:30–09:40 ET — you can still freeze at any time</div>';
+    var statusLine = entry ? '<div class="snap-status warn" style="margin-bottom:6px">⚠ Last attempt: ' + esc(entry.reason) + '</div>' : '';
+    el.innerHTML = statusLine + '<button class="btn btn-primary" id="freezeBtn">' + label + '</button>' + windowNote;
     var fb = $('freezeBtn');
     if (fb) fb.addEventListener('click', doFreezeScreener);
   });
