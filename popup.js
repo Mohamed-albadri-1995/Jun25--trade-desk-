@@ -4695,7 +4695,240 @@ function jnl_renderList() {
   jnl_renderTimeTab(scoped);
   jnl_renderRiskTab(scoped);
   jnl_renderStatsCatalog(scoped);
+  jnl_renderMarketTab(scoped);
   jnl_dashApplyVisibility();
+}
+
+function jnl_renderMarketTab(trades) {
+  var el = document.getElementById('jnl-market-dash');
+  if (!el) return;
+  var closed = (trades || []).filter(function(t) { return !t.open && t.netPnl !== null; });
+  if (!closed.length) {
+    el.innerHTML = '<div style="color:#475569;font-size:12px;padding:12px 0">No closed trades to analyse.</div>';
+    return;
+  }
+  el.innerHTML = '<div style="color:#475569;font-size:11px;padding:8px 0">Loading market context…</div>';
+
+  // Unique tickers for Yahoo profile fetch
+  var tickers = [], tickerSeen = {};
+  closed.forEach(function(t) { if (!tickerSeen[t.ticker]) { tickerSeen[t.ticker] = true; tickers.push(t.ticker); } });
+  var profilePromises = tickers.map(function(tk) {
+    return new Promise(function(resolve) {
+      chrome.runtime.sendMessage({ action: 'fetchTickerProfile', ticker: tk }, function(r) {
+        resolve({ ticker: tk, profile: r || {} });
+      });
+    });
+  });
+
+  Promise.all([
+    storageGet(['marketSnapshots', 'eodOutcome']),
+    Promise.all(profilePromises)
+  ]).then(function(results) {
+    var allSnaps = results[0].marketSnapshots || {};
+    var allEod   = results[0].eodOutcome   || {};
+    var profileByTicker = {};
+    results[1].forEach(function(x) { profileByTicker[x.ticker] = x.profile; });
+
+    // Enrich each trade with snapshot + EOD data
+    var enriched = closed.map(function(t) {
+      var slot    = jnl_nearestSnapSlot(t.entryTs);
+      var snap    = slot && allSnaps[t.date] && allSnaps[t.date][slot];
+      var eodDay  = allEod[t.date];
+      var eodRow  = eodDay && eodDay.rows && eodDay.rows[t.ticker];
+      var profile = profileByTicker[t.ticker] || {};
+      var broadSector = resolveBroadSector({ sector: profile.sector || '', industry: profile.industry || '' });
+      var secData = snap && snap.sectors && broadSector && snap.sectors[broadSector];
+      return {
+        t: t,
+        snap: snap || null,
+        regime:    snap ? (snap.regime && snap.regime.slug) || null : null,
+        lt:        snap && snap.longTerm  ? snap.longTerm.result  : null,
+        mt:        snap && snap.midTerm   ? snap.midTerm.result   : null,
+        st:        snap && snap.shortTerm ? snap.shortTerm.result : null,
+        secBias:   secData ? secData.bias : null,
+        eod:       eodRow || null
+      };
+    });
+
+    // ── helpers ──
+    function winColor(pct) {
+      return pct >= 60 ? '#4ade80' : pct >= 40 ? '#fbbf24' : '#f87171';
+    }
+    function pnlColor(v) { return v > 0 ? '#4ade80' : v < 0 ? '#f87171' : '#94a3b8'; }
+    function fmt$(v) { if (v == null) return '—'; return (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(0); }
+    function secHdr(title) {
+      return '<div style="color:#475569;font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;padding:10px 0 5px">' + title + '</div>';
+    }
+    function aggBucket(rows) {
+      var n = rows.length, wins = 0, pnlSum = 0;
+      rows.forEach(function(r) { if (r.t.netPnl > 0) wins++; pnlSum += r.t.netPnl; });
+      var winPct = n ? Math.round(wins / n * 100) : 0;
+      return { n: n, winPct: winPct, avgPnl: n ? pnlSum / n : 0, totalPnl: pnlSum };
+    }
+
+    var h = '';
+
+    // ── Section 1: Performance by Market Regime ──
+    var byRegime = {};
+    var noSnap = [];
+    enriched.forEach(function(e) {
+      if (!e.regime) { noSnap.push(e); return; }
+      if (!byRegime[e.regime]) byRegime[e.regime] = [];
+      byRegime[e.regime].push(e);
+    });
+    var regimeSlugs = Object.keys(byRegime).sort(function(a, b) {
+      var ag = aggBucket(byRegime[a]), bg2 = aggBucket(byRegime[b]);
+      return bg2.winPct - ag.winPct;
+    });
+    if (regimeSlugs.length) {
+      h += secHdr('Performance by Market Regime at Entry');
+      h += '<div class="snap-table-wrap"><table class="reg-table">';
+      h += '<tr><th>Regime</th><th>Trades</th><th>Win%</th><th>Avg P&L</th><th>Total P&L</th></tr>';
+      regimeSlugs.forEach(function(slug) {
+        var def = REGIME_CATALOG[slug] || { icon: '❔', label: slug, color: '#94a3b8' };
+        var agg = aggBucket(byRegime[slug]);
+        h += '<tr>';
+        h += '<td><span style="font-size:13px">' + htmlEscape(def.icon) + '</span> <span style="color:' + def.color + ';font-weight:600">' + htmlEscape(def.label) + '</span></td>';
+        h += '<td>' + agg.n + '</td>';
+        h += '<td style="color:' + winColor(agg.winPct) + ';font-weight:700">' + agg.winPct + '%</td>';
+        h += '<td style="color:' + pnlColor(agg.avgPnl) + '">' + fmt$(agg.avgPnl) + '</td>';
+        h += '<td style="color:' + pnlColor(agg.totalPnl) + '">' + fmt$(agg.totalPnl) + '</td>';
+        h += '</tr>';
+      });
+      if (noSnap.length) {
+        h += '<tr style="opacity:0.5"><td style="color:#475569">No snapshot</td><td>' + noSnap.length + '</td><td>—</td><td>—</td><td>—</td></tr>';
+      }
+      h += '</table></div>';
+    }
+
+    // ── Section 2: Market Bias Grid (LT / MT / ST) ──
+    var biasKeys = ['BULLISH', 'NEUTRAL', 'BEARISH'];
+    function biasGrid(label, field) {
+      var buckets = {};
+      biasKeys.forEach(function(k) { buckets[k] = []; });
+      var missing = [];
+      enriched.forEach(function(e) {
+        var v = e[field];
+        if (v && buckets[v]) buckets[v].push(e);
+        else missing.push(e);
+      });
+      var hasAny = biasKeys.some(function(k) { return buckets[k].length > 0; });
+      if (!hasAny) return '';
+      var row = '<tr><td style="color:#94a3b8;font-size:10px">' + label + '</td>';
+      biasKeys.forEach(function(k) {
+        if (!buckets[k].length) { row += '<td style="color:#334155">—</td>'; return; }
+        var agg = aggBucket(buckets[k]);
+        var biasBg = k === 'BULLISH' ? '#0a2e1a' : k === 'BEARISH' ? '#2e0f0f' : '#1e293b';
+        row += '<td style="background:' + biasBg + ';text-align:center">';
+        row += '<div style="font-size:10px;color:#64748b">' + agg.n + ' trades</div>';
+        row += '<div style="font-weight:700;color:' + winColor(agg.winPct) + '">' + agg.winPct + '%</div>';
+        row += '<div style="font-size:10px;color:' + pnlColor(agg.avgPnl) + '">' + fmt$(agg.avgPnl) + ' avg</div>';
+        row += '</td>';
+      });
+      row += '</tr>';
+      return row;
+    }
+    var ltRow = biasGrid('Long Term',  'lt');
+    var mtRow = biasGrid('Mid Term',   'mt');
+    var stRow = biasGrid('Short Term', 'st');
+    if (ltRow || mtRow || stRow) {
+      h += secHdr('Market Bias at Entry Time');
+      h += '<div class="snap-table-wrap"><table class="reg-table">';
+      h += '<tr><th></th>';
+      biasKeys.forEach(function(k) {
+        var c = k === 'BULLISH' ? '#4ade80' : k === 'BEARISH' ? '#f87171' : '#94a3b8';
+        h += '<th style="color:' + c + ';text-align:center">' + k + '</th>';
+      });
+      h += '</tr>';
+      h += ltRow + mtRow + stRow;
+      h += '</table></div>';
+    }
+
+    // ── Section 3: Sector Alignment ──
+    var bySec = { BULLISH: [], NEUTRAL: [], BEARISH: [], unknown: [] };
+    enriched.forEach(function(e) {
+      if (!e.secBias) { bySec.unknown.push(e); return; }
+      (bySec[e.secBias] || bySec.unknown).push(e);
+    });
+    var secHasAny = biasKeys.some(function(k) { return bySec[k].length > 0; });
+    if (secHasAny) {
+      h += secHdr('Sector Bias at Entry Time');
+      h += '<div class="snap-table-wrap"><table class="reg-table">';
+      h += '<tr><th>Sector Bias</th><th>Trades</th><th>Win%</th><th>Avg P&L</th><th>Total P&L</th></tr>';
+      biasKeys.forEach(function(k) {
+        if (!bySec[k].length) return;
+        var agg = aggBucket(bySec[k]);
+        var c = k === 'BULLISH' ? '#4ade80' : k === 'BEARISH' ? '#f87171' : '#94a3b8';
+        h += '<tr>';
+        h += '<td style="color:' + c + ';font-weight:700">' + k + '</td>';
+        h += '<td>' + agg.n + '</td>';
+        h += '<td style="color:' + winColor(agg.winPct) + ';font-weight:700">' + agg.winPct + '%</td>';
+        h += '<td style="color:' + pnlColor(agg.avgPnl) + '">' + fmt$(agg.avgPnl) + '</td>';
+        h += '<td style="color:' + pnlColor(agg.totalPnl) + '">' + fmt$(agg.totalPnl) + '</td>';
+        h += '</tr>';
+      });
+      if (bySec.unknown.length) {
+        h += '<tr style="opacity:0.5"><td style="color:#475569">No data</td><td>' + bySec.unknown.length + '</td><td>—</td><td>—</td><td>—</td></tr>';
+      }
+      h += '</table></div>';
+    }
+
+    // ── Section 4: EOD Opportunity (Register 3) ──
+    var eodMatched = enriched.filter(function(e) { return e.eod && e.eod.upR40 != null; });
+    if (eodMatched.length) {
+      var avgUpR = 0, avgDownR = 0, avgCapture = 0, captureN = 0;
+      eodMatched.forEach(function(e) {
+        avgUpR   += e.eod.upR40;
+        avgDownR += e.eod.downR40 != null ? e.eod.downR40 : 0;
+        if (e.t.exitAnalysis && e.t.exitAnalysis.capturePct != null) {
+          avgCapture += e.t.exitAnalysis.capturePct;
+          captureN++;
+        }
+      });
+      var n = eodMatched.length;
+      avgUpR   /= n;
+      avgDownR /= n;
+      avgCapture = captureN ? avgCapture / captureN : null;
+
+      h += secHdr('EOD Opportunity vs Actual (Register 3 · ' + n + ' trades matched)');
+      h += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px">';
+      function kpi(label, val, color) {
+        return '<div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:8px 10px;text-align:center">' +
+          '<div style="font-size:9px;color:#475569;font-weight:600;letter-spacing:0.08em;margin-bottom:4px">' + label + '</div>' +
+          '<div style="font-size:16px;font-weight:700;color:' + (color || '#e2e8f0') + '">' + val + '</div>' +
+          '</div>';
+      }
+      h += kpi('AVG DAY UPSIDE', avgUpR.toFixed(2) + 'R', '#4ade80');
+      h += kpi('AVG DAY DRAWDOWN', avgDownR.toFixed(2) + 'R', '#f87171');
+      h += avgCapture != null ? kpi('AVG CAPTURE %', avgCapture.toFixed(0) + '%', avgCapture >= 60 ? '#4ade80' : avgCapture >= 30 ? '#fbbf24' : '#f87171') : kpi('AVG CAPTURE %', '—', '#475569');
+      h += '</div>';
+      // Top 5 biggest opportunity misses
+      var sorted = eodMatched.slice().sort(function(a, b) { return b.eod.upR40 - a.eod.upR40; }).slice(0, 8);
+      h += '<div class="snap-table-wrap"><table class="reg-table">';
+      h += '<tr><th>Ticker</th><th>Date</th><th>Day UpR</th><th>Day DownR</th><th>Trade P&L</th><th>Capture%</th></tr>';
+      sorted.forEach(function(e) {
+        var cap = e.t.exitAnalysis && e.t.exitAnalysis.capturePct != null ? e.t.exitAnalysis.capturePct.toFixed(0) + '%' : '—';
+        var capColor = e.t.exitAnalysis && e.t.exitAnalysis.capturePct != null
+          ? (e.t.exitAnalysis.capturePct >= 60 ? '#4ade80' : e.t.exitAnalysis.capturePct >= 30 ? '#fbbf24' : '#f87171')
+          : '#475569';
+        h += '<tr>';
+        h += '<td style="color:#4ade80;font-weight:600">' + htmlEscape(e.t.ticker) + '</td>';
+        h += '<td style="color:#64748b;font-size:10px">' + htmlEscape(e.t.date) + '</td>';
+        h += '<td style="color:#4ade80">' + e.eod.upR40.toFixed(2) + 'R</td>';
+        h += '<td style="color:#f87171">' + (e.eod.downR40 != null ? e.eod.downR40.toFixed(2) + 'R' : '—') + '</td>';
+        h += '<td style="color:' + pnlColor(e.t.netPnl) + '">' + fmt$(e.t.netPnl) + '</td>';
+        h += '<td style="color:' + capColor + '">' + cap + '</td>';
+        h += '</tr>';
+      });
+      h += '</table></div>';
+    }
+
+    if (!h) {
+      el.innerHTML = '<div style="color:#475569;font-size:12px;padding:12px 0">No Register 2 or Register 3 data matched to these trades yet. Capture market snapshots during trading hours and run EOD outcome after market close.</div>';
+    } else {
+      el.innerHTML = h;
+    }
+  });
 }
 
 function jnl_wireCardButtons() {
