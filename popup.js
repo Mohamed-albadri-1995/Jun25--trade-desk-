@@ -732,6 +732,44 @@ function renderBiasPanel() {
     ltChip = '<span class="chip ' + (dp >= 0 ? 'bull' : 'bear') + '">' + (ltData.src || 'SPY') + ' ' + (dp >= 0 ? '+' : '') + dp.toFixed(2) + '% vs 200DMA</span>';
   }
 
+  function shortDetail() {
+    var ix = marketCtx.indices;
+    if (!ix) return '<div class="sig-note">Refresh market data to compute signals.</div>';
+    var sigs = [];
+    function addDay(ticker, d) {
+      if (!d || d.change == null) { sigs.push({ label: ticker + ' day', state: 'unknown', pts: 0 }); return; }
+      var pts = d.change > 0.3 ? 1 : d.change < -0.3 ? -1 : 0;
+      var sign = d.change >= 0 ? '+' : '';
+      sigs.push({ label: ticker + ' day ' + sign + d.change.toFixed(2) + '%', state: pts > 0 ? 'bull' : pts < 0 ? 'bear' : 'neu', pts: pts });
+    }
+    addDay('SPY', ix.SPY); addDay('QQQ', ix.QQQ); addDay('IWM', ix.IWM);
+    var vixPts = 0;
+    if (ix.VIX && ix.VIX.change != null) {
+      if (ix.VIX.change > 3) vixPts = -2;
+      else if (ix.VIX.change > 1) vixPts = -1;
+      else if (ix.VIX.change < -2) vixPts = 1;
+      var vs = ix.VIX.change >= 0 ? '+' : '';
+      sigs.push({ label: 'VIX day ' + vs + ix.VIX.change.toFixed(2) + '%', state: vixPts > 0 ? 'bull' : vixPts < 0 ? 'bear' : 'neu', pts: vixPts });
+    } else { sigs.push({ label: 'VIX', state: 'unknown', pts: 0 }); }
+    function addWeek(ticker, d) {
+      if (!d || d.weekChg == null) { sigs.push({ label: ticker + ' week', state: 'unknown', pts: 0 }); return; }
+      var pts = d.weekChg > 1 ? 1 : d.weekChg < -1 ? -1 : 0;
+      var sign = d.weekChg >= 0 ? '+' : '';
+      sigs.push({ label: ticker + ' week ' + sign + d.weekChg.toFixed(2) + '%', state: pts > 0 ? 'bull' : pts < 0 ? 'bear' : 'neu', pts: pts });
+    }
+    addWeek('SPY', ix.SPY); addWeek('QQQ', ix.QQQ);
+    var total = sigs.reduce(function (acc, x) { return acc + x.pts; }, 0);
+    var result = total >= 3 ? 'BULLISH' : total <= -3 ? 'BEARISH' : 'NEUTRAL';
+    var h = '<div class="sig-note" style="margin-bottom:6px">Score ' + (total > 0 ? '+' : '') + total + ' → ' + result + ' (±3 threshold)</div>';
+    h += '<div class="sig-grid"><div class="sig-hdr"><span>Signal</span><span>State</span><span>Pts</span></div>';
+    sigs.forEach(function (x) {
+      var c = x.state === 'bull' ? 'sb' : x.state === 'bear' ? 'se' : 'sn';
+      var pStr = x.pts > 0 ? '+' + x.pts : x.pts < 0 ? '' + x.pts : '—';
+      h += '<div class="sig-r ' + c + '"><span>' + esc(x.label) + '</span><span>' + x.state + '</span><span>' + pStr + '</span></div>';
+    });
+    return h + '</div>';
+  }
+
   function sigDetail() {
     var sg = midData && midData.signals || [];
     if (!sg.length) return '<div class="sig-note">Refresh market data to compute signals.</div>';
@@ -758,7 +796,7 @@ function renderBiasPanel() {
   var refreshStr = marketCtx.lastRefresh ? 'Refreshed ' + fmtETTime(marketCtx.lastRefresh) + ' ET' : 'Not yet loaded';
   host.className = 'bias-panel';
   host.innerHTML = regimeHtml +
-    row('short', 'SHORT-TERM (Today)', st, rowCls(st), stIcon, '', '', '', 'short') +
+    row('short', 'SHORT-TERM (Today)', st, rowCls(st), stIcon, '', '', shortDetail(), 'short') +
     row('mid', 'MID-TERM (Trend)', marketCtx.marketStage, rowCls(marketCtx.marketStage), (midData && midData.stage !== 'UNKNOWN' ? '📊' : '⚪'), bbChip, (midData && midData.stageLabel) || '', sigDetail(), 'mid') +
     row('long', 'LONG-TERM (200DMA)', lt, rowCls(lt), (lt !== 'UNKNOWN' ? '📈' : '⚪'), ltChip, (ltData && ltData.label) || '', (ltData ? '<div class="sig-note">' + esc(ltData.label) + '</div>' : ''), 'long') +
     '<div class="bias-foot">' + refreshStr + '</div>';
