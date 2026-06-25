@@ -491,11 +491,14 @@
       <div id="freezeBar"></div>
       <div id="frozenScreenerView"></div>
       <div class="snap-io-bar">
-        <button class="btn btn-ghost" id="reg1Export">⬇ Export JSON</button>
-        <button class="btn btn-ghost" id="reg1Import">⬆ Import JSON</button>
+        <button class="btn btn-ghost" id="reg1ExportJson">⬇ Backup JSON</button>
+        <button class="btn btn-ghost" id="reg1ImportJson">⬆ Restore JSON</button>
+        <button class="btn btn-ghost" id="reg1ExportCsv">⬇ Export CSV</button>
+        <button class="btn btn-ghost" id="reg1ImportCsv">⬆ Import CSV</button>
         <span id="reg1IoStatus" class="snap-io-status"></span>
       </div>
-      <input type="file" id="reg1ImportFile" accept=".json" style="display:none">
+      <input type="file" id="reg1ImportJsonFile" accept=".json" style="display:none">
+      <input type="file" id="reg1ImportCsvFile" accept=".csv" style="display:none">
     </div>
 
     <!-- ── Register 2: Market Snapshots ── -->
@@ -505,11 +508,14 @@
       <div id="snapshotBar"></div>
       <div id="marketSnapshotsView"></div>
       <div class="snap-io-bar">
-        <button class="btn btn-ghost" id="reg2Export">⬇ Export JSON</button>
-        <button class="btn btn-ghost" id="reg2Import">⬆ Import JSON</button>
+        <button class="btn btn-ghost" id="reg2ExportJson">⬇ Backup JSON</button>
+        <button class="btn btn-ghost" id="reg2ImportJson">⬆ Restore JSON</button>
+        <button class="btn btn-ghost" id="reg2ExportCsv">⬇ Export CSV</button>
+        <button class="btn btn-ghost" id="reg2ImportCsv">⬆ Import CSV</button>
         <span id="reg2IoStatus" class="snap-io-status"></span>
       </div>
-      <input type="file" id="reg2ImportFile" accept=".json" style="display:none">
+      <input type="file" id="reg2ImportJsonFile" accept=".json" style="display:none">
+      <input type="file" id="reg2ImportCsvFile" accept=".csv" style="display:none">
     </div>
 
   </div>

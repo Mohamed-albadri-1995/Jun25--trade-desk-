@@ -1276,38 +1276,92 @@ function downloadJSON(obj, filename) {
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
+function downloadCSV(text, filename) {
+  var blob = new Blob([text], { type: 'text/csv' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
 function setIoStatus(id, msg) {
   var el = $(id); if (el) el.textContent = msg;
 }
 
-function exportFrozenScreener() {
-  var date = etDateStr();
-  loadFrozenScreener(date).then(function (entry) {
-    if (!entry) { setIoStatus('reg1IoStatus', '⚠ No data for ' + date); return; }
-    downloadJSON({ date: date, entry: entry }, 'frozen-screener-' + date + '.json');
-    setIoStatus('reg1IoStatus', '✅ Downloaded frozen-screener-' + date + '.json');
+function buildCSV(headers, rows) {
+  function q(v) {
+    v = v == null ? '' : String(v);
+    if (v.indexOf(',') !== -1 || v.indexOf('"') !== -1 || v.indexOf('\n') !== -1)
+      return '"' + v.replace(/"/g, '""') + '"';
+    return v;
+  }
+  var lines = [headers.map(q).join(',')];
+  rows.forEach(function (row) {
+    lines.push(headers.map(function (h) { return q(row[h]); }).join(','));
+  });
+  return lines.join('\r\n');
+}
+
+function parseCSVRow(line) {
+  var result = [], cur = '', inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var c = line[i];
+    if (inQ) {
+      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (c === '"') { inQ = false; }
+      else { cur += c; }
+    } else {
+      if (c === '"') { inQ = true; }
+      else if (c === ',') { result.push(cur); cur = ''; }
+      else { cur += c; }
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
+function parseCSV(text) {
+  var lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  var headers = parseCSVRow(lines[0]);
+  return lines.slice(1).filter(function (l) { return l.trim(); }).map(function (line) {
+    var vals = parseCSVRow(line), obj = {};
+    headers.forEach(function (h, i) { obj[h.trim()] = vals[i] != null ? vals[i] : ''; });
+    return obj;
   });
 }
 
-function importFrozenScreener(file) {
+// ── Register 1 — Frozen Screener ────────────────────────────────────
+function exportFrozenScreenerJson() {
+  storageGet(['frozenScreener']).then(function (r) {
+    var all = r.frozenScreener || {};
+    if (!Object.keys(all).length) { setIoStatus('reg1IoStatus', '⚠ No screener data to export'); return; }
+    downloadJSON({ _type: 'frozenScreener', _exported: new Date().toISOString(), data: all },
+      'frozen-screener-backup.json');
+    setIoStatus('reg1IoStatus', '✅ Backup: frozen-screener-backup.json (' + Object.keys(all).length + ' day(s))');
+  });
+}
+
+function importFrozenScreenerJson(file) {
   var reader = new FileReader();
   reader.onload = function (e) {
     try {
-      var data = JSON.parse(e.target.result);
-      var entry = data.entry || data;
-      var date = data.date || etDateStr();
-      if (!entry || typeof entry !== 'object' || !entry.rows) {
-        setIoStatus('reg1IoStatus', '⚠ Invalid file — missing rows'); return;
-      }
+      var raw = JSON.parse(e.target.result);
+      var incoming;
+      if (raw._type === 'frozenScreener' && raw.data) { incoming = raw.data; }
+      else if (raw.entry || raw.rows) { var d = raw.date || etDateStr(); incoming = {}; incoming[d] = raw.entry || raw; }
+      else { incoming = raw; }
+      if (typeof incoming !== 'object' || !Object.keys(incoming).length)
+        { setIoStatus('reg1IoStatus', '⚠ Invalid file structure'); return; }
       storageGet(['frozenScreener']).then(function (r) {
         var store = r.frozenScreener || {};
-        if (store[date] && store[date].complete === true) {
-          if (!window.confirm('Frozen screener for ' + date + ' is already locked. Overwrite?')) return;
-        }
-        store[date] = entry;
+        var locked = Object.keys(incoming).filter(function (d) { return store[d] && store[d].complete === true; });
+        if (locked.length && !window.confirm('Locked entries for ' + locked.join(', ') + '. Overwrite?')) return;
+        Object.assign(store, incoming);
         storageSet({ frozenScreener: store }).then(function () {
           renderFreezeBtn(); renderFrozenScreenerView();
-          setIoStatus('reg1IoStatus', '✅ Imported for ' + date + ' (' + Object.keys(entry.rows).length + ' stocks)');
+          setIoStatus('reg1IoStatus', '✅ Restored ' + Object.keys(incoming).length + ' day(s)');
         });
       });
     } catch (err) { setIoStatus('reg1IoStatus', '⚠ Parse error: ' + err.message); }
@@ -1315,40 +1369,188 @@ function importFrozenScreener(file) {
   reader.readAsText(file);
 }
 
-function exportMarketSnapshots() {
+function exportFrozenScreenerCsv() {
   var date = etDateStr();
-  loadMarketSnapshots(date).then(function (snaps) {
-    if (!Object.keys(snaps).length) { setIoStatus('reg2IoStatus', '⚠ No snapshots for ' + date); return; }
-    downloadJSON({ date: date, slots: snaps }, 'market-snapshots-' + date + '.json');
-    setIoStatus('reg2IoStatus', '✅ Downloaded market-snapshots-' + date + '.json');
+  loadFrozenScreener(date).then(function (entry) {
+    if (!entry || !entry.rows || !Object.keys(entry.rows).length)
+      { setIoStatus('reg1IoStatus', '⚠ No data for today (' + date + ')'); return; }
+    var headers = ['date','slot','captured_at','ticker','price','change_pct','screeners','st_bias','lt_bias','complete'];
+    var rows = Object.keys(entry.rows).sort().map(function (ticker) {
+      var r = entry.rows[ticker], s = r.stock || {}, ctx = r.context || {};
+      return {
+        date: date, slot: entry.slot || '09:35', captured_at: entry.capturedAt || '',
+        ticker: ticker,
+        price: s.price != null ? s.price.toFixed(2) : '',
+        change_pct: s.change != null ? s.change.toFixed(2) : '',
+        screeners: (r.screenerKeys || []).join('|'),
+        st_bias: ctx.shortTerm || '', lt_bias: ctx.longTerm || '',
+        complete: entry.complete ? 'true' : 'false'
+      };
+    });
+    downloadCSV(buildCSV(headers, rows), 'frozen-screener-' + date + '.csv');
+    setIoStatus('reg1IoStatus', '✅ CSV: frozen-screener-' + date + '.csv (' + rows.length + ' stocks)');
   });
 }
 
-function importMarketSnapshots(file) {
+function importFrozenScreenerCsv(file) {
   var reader = new FileReader();
   reader.onload = function (e) {
     try {
-      var data = JSON.parse(e.target.result);
-      var slots = data.slots || data;
-      var date = data.date || etDateStr();
-      if (!slots || typeof slots !== 'object') {
-        setIoStatus('reg2IoStatus', '⚠ Invalid file — no slot data'); return;
-      }
-      var validSlots = Object.keys(slots).filter(function (k) { return SNAPSHOT_SLOTS.indexOf(k) !== -1; });
-      if (!validSlots.length) {
-        setIoStatus('reg2IoStatus', '⚠ No valid slots found (expected 09:30–10:00)'); return;
-      }
+      var rows = parseCSV(e.target.result);
+      if (!rows.length || !rows[0].ticker) { setIoStatus('reg1IoStatus', '⚠ No ticker column found'); return; }
+      var date = rows[0].date || etDateStr();
+      var entry = {
+        slot: rows[0].slot || '09:35', capturedAt: rows[0].captured_at || '',
+        ts: Date.now(), _ctxTime: 0,
+        complete: rows[0].complete === 'true',
+        reason: rows[0].complete === 'true' ? '' : 'Imported from CSV',
+        rows: {}
+      };
+      rows.forEach(function (row) {
+        if (!row.ticker) return;
+        entry.rows[row.ticker] = {
+          date: date,
+          stock: { ticker: row.ticker,
+            price: row.price !== '' ? parseFloat(row.price) : null,
+            change: row.change_pct !== '' ? parseFloat(row.change_pct) : null },
+          context: { shortTerm: row.st_bias || 'UNKNOWN', longTerm: row.lt_bias || 'UNKNOWN' },
+          screenerKeys: row.screeners ? row.screeners.split('|').filter(Boolean) : [],
+          lastUpdated: Date.now()
+        };
+      });
+      storageGet(['frozenScreener']).then(function (r) {
+        var store = r.frozenScreener || {};
+        if (store[date] && store[date].complete === true &&
+            !window.confirm('Frozen screener for ' + date + ' is locked. Overwrite?')) return;
+        store[date] = entry;
+        storageSet({ frozenScreener: store }).then(function () {
+          renderFreezeBtn(); renderFrozenScreenerView();
+          setIoStatus('reg1IoStatus', '✅ Imported ' + rows.length + ' stocks for ' + date);
+        });
+      });
+    } catch (err) { setIoStatus('reg1IoStatus', '⚠ Parse error: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+// ── Register 2 — Market Snapshots ────────────────────────────────────
+function exportMarketSnapshotsJson() {
+  storageGet(['marketSnapshots']).then(function (r) {
+    var all = r.marketSnapshots || {};
+    if (!Object.keys(all).length) { setIoStatus('reg2IoStatus', '⚠ No snapshot data to export'); return; }
+    downloadJSON({ _type: 'marketSnapshots', _exported: new Date().toISOString(), data: all },
+      'market-snapshots-backup.json');
+    setIoStatus('reg2IoStatus', '✅ Backup: market-snapshots-backup.json (' + Object.keys(all).length + ' day(s))');
+  });
+}
+
+function importMarketSnapshotsJson(file) {
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      var raw = JSON.parse(e.target.result);
+      var incoming;
+      if (raw._type === 'marketSnapshots' && raw.data) { incoming = raw.data; }
+      else if (raw.slots) { var d = raw.date || etDateStr(); incoming = {}; incoming[d] = raw.slots; }
+      else { incoming = raw; }
+      if (typeof incoming !== 'object' || !Object.keys(incoming).length)
+        { setIoStatus('reg2IoStatus', '⚠ Invalid file structure'); return; }
+      storageGet(['marketSnapshots']).then(function (r) {
+        var store = r.marketSnapshots || {};
+        Object.keys(incoming).forEach(function (date) {
+          store[date] = Object.assign({}, store[date] || {}, incoming[date]);
+        });
+        storageSet({ marketSnapshots: store }).then(function () {
+          renderSnapshotBar(); renderMarketSnapshotsView();
+          setIoStatus('reg2IoStatus', '✅ Restored ' + Object.keys(incoming).length + ' day(s)');
+        });
+      });
+    } catch (err) { setIoStatus('reg2IoStatus', '⚠ Parse error: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+function exportMarketSnapshotsCsv() {
+  var date = etDateStr();
+  loadMarketSnapshots(date).then(function (snaps) {
+    var slots = SNAPSHOT_SLOTS.filter(function (s) { return snaps[s]; });
+    if (!slots.length) { setIoStatus('reg2IoStatus', '⚠ No snapshots for today (' + date + ')'); return; }
+    var headers = ['date','slot','captured_at','spy_price','spy_chg','qqq_price','qqq_chg',
+      'iwm_price','iwm_chg','vix_level','vix_chg','st_bias','st_score','mid_term','lt_bias',
+      'regime','sectors','breakouts','complete'];
+    var rows = slots.map(function (slot) {
+      var s = snaps[slot], ix = s.indices || {};
+      function px(k) { return ix[k] && ix[k].close != null ? ix[k].close.toFixed(2) : ''; }
+      function ch(k) { return ix[k] && ix[k].change != null ? ix[k].change.toFixed(2) : ''; }
+      var sectStr = s.sectors ? Object.keys(s.sectors).map(function (n) {
+        return n + '=' + (s.sectors[n].bias || 'NEUTRAL');
+      }).join(';') : '';
+      return {
+        date: date, slot: slot, captured_at: s.capturedAt || '',
+        spy_price: px('SPY'), spy_chg: ch('SPY'),
+        qqq_price: px('QQQ'), qqq_chg: ch('QQQ'),
+        iwm_price: px('IWM'), iwm_chg: ch('IWM'),
+        vix_level: px('VIX'), vix_chg: ch('VIX'),
+        st_bias: (s.shortTerm && s.shortTerm.result) || '',
+        st_score: (s.shortTerm && s.shortTerm.score != null) ? s.shortTerm.score : '',
+        mid_term: (s.midTerm && s.midTerm.result) || '',
+        lt_bias: (s.longTerm && s.longTerm.result) || '',
+        regime: (s.regime && s.regime.slug) || '',
+        sectors: sectStr,
+        breakouts: (s.breakoutNames || []).join('|'),
+        complete: s.complete ? 'true' : 'false'
+      };
+    });
+    downloadCSV(buildCSV(headers, rows), 'market-snapshots-' + date + '.csv');
+    setIoStatus('reg2IoStatus', '✅ CSV: market-snapshots-' + date + '.csv (' + rows.length + ' slot(s))');
+  });
+}
+
+function importMarketSnapshotsCsv(file) {
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      var rows = parseCSV(e.target.result);
+      if (!rows.length || !rows[0].slot) { setIoStatus('reg2IoStatus', '⚠ No slot column found'); return; }
+      var date = rows[0].date || etDateStr();
+      var slots = {};
+      rows.forEach(function (row) {
+        var slot = row.slot; if (!slot || SNAPSHOT_SLOTS.indexOf(slot) === -1) return;
+        function pf(v) { return v !== '' ? parseFloat(v) : null; }
+        var sectors = {};
+        if (row.sectors) {
+          row.sectors.split(';').forEach(function (part) {
+            var kv = part.split('=');
+            if (kv.length === 2 && kv[0]) sectors[kv[0]] = { bias: kv[1] };
+          });
+        }
+        slots[slot] = {
+          slot: slot, capturedAt: row.captured_at || '', ts: Date.now(),
+          complete: row.complete === 'true', reason: row.complete === 'true' ? '' : 'Imported from CSV',
+          indices: {
+            SPY: { close: pf(row.spy_price), change: pf(row.spy_chg) },
+            QQQ: { close: pf(row.qqq_price), change: pf(row.qqq_chg) },
+            IWM: { close: pf(row.iwm_price), change: pf(row.iwm_chg) },
+            VIX: { close: pf(row.vix_level), change: pf(row.vix_chg) }
+          },
+          shortTerm: { result: row.st_bias || '', score: row.st_score ? parseInt(row.st_score) : 0, signals: [] },
+          midTerm: { result: row.mid_term || '', signals: [] },
+          longTerm: { result: row.lt_bias || '' },
+          regime: { slug: row.regime || '', label: (row.regime || '').replace(/_/g, ' ') },
+          sectors: sectors,
+          breakoutNames: row.breakouts ? row.breakouts.split('|').filter(Boolean) : []
+        };
+      });
+      if (!Object.keys(slots).length) { setIoStatus('reg2IoStatus', '⚠ No valid slots found'); return; }
       storageGet(['marketSnapshots']).then(function (r) {
         var store = r.marketSnapshots || {};
         var existing = store[date] || {};
         var hasLocked = Object.keys(existing).some(function (s) { return existing[s] && existing[s].complete; });
-        if (hasLocked) {
-          if (!window.confirm('Some slots for ' + date + ' are already captured. Merge and overwrite?')) return;
-        }
+        if (hasLocked && !window.confirm('Some slots for ' + date + ' are captured. Merge and overwrite?')) return;
         store[date] = Object.assign({}, existing, slots);
         storageSet({ marketSnapshots: store }).then(function () {
           renderSnapshotBar(); renderMarketSnapshotsView();
-          setIoStatus('reg2IoStatus', '✅ Imported ' + validSlots.length + ' slot(s) for ' + date);
+          setIoStatus('reg2IoStatus', '✅ Imported ' + Object.keys(slots).length + ' slot(s) for ' + date);
         });
       });
     } catch (err) { setIoStatus('reg2IoStatus', '⚠ Parse error: ' + err.message); }
@@ -1357,25 +1559,18 @@ function importMarketSnapshots(file) {
 }
 
 function initRegisterIO() {
-  var r1ex = $('reg1Export');
-  if (r1ex) r1ex.addEventListener('click', exportFrozenScreener);
-
-  var r1im = $('reg1Import');
-  var r1file = $('reg1ImportFile');
-  if (r1im && r1file) {
-    r1im.addEventListener('click', function () { r1file.value = ''; r1file.click(); });
-    r1file.addEventListener('change', function () { if (r1file.files[0]) importFrozenScreener(r1file.files[0]); });
+  function wire(exportId, exportFn, importId, fileId, importFn) {
+    var exBtn = $(exportId); if (exBtn) exBtn.addEventListener('click', exportFn);
+    var imBtn = $(importId), fileEl = $(fileId);
+    if (imBtn && fileEl) {
+      imBtn.addEventListener('click', function () { fileEl.value = ''; fileEl.click(); });
+      fileEl.addEventListener('change', function () { if (fileEl.files[0]) importFn(fileEl.files[0]); });
+    }
   }
-
-  var r2ex = $('reg2Export');
-  if (r2ex) r2ex.addEventListener('click', exportMarketSnapshots);
-
-  var r2im = $('reg2Import');
-  var r2file = $('reg2ImportFile');
-  if (r2im && r2file) {
-    r2im.addEventListener('click', function () { r2file.value = ''; r2file.click(); });
-    r2file.addEventListener('change', function () { if (r2file.files[0]) importMarketSnapshots(r2file.files[0]); });
-  }
+  wire('reg1ExportJson', exportFrozenScreenerJson, 'reg1ImportJson', 'reg1ImportJsonFile', importFrozenScreenerJson);
+  wire('reg1ExportCsv',  exportFrozenScreenerCsv,  'reg1ImportCsv',  'reg1ImportCsvFile',  importFrozenScreenerCsv);
+  wire('reg2ExportJson', exportMarketSnapshotsJson, 'reg2ImportJson', 'reg2ImportJsonFile', importMarketSnapshotsJson);
+  wire('reg2ExportCsv',  exportMarketSnapshotsCsv,  'reg2ImportCsv',  'reg2ImportCsvFile',  importMarketSnapshotsCsv);
 }
 
 // ══════════════════════════════════════════════════════════════════════
