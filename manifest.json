@@ -3,7 +3,7 @@
   "name": "Trade Desk — Market, Screener & Journal",
   "version": "2.0.0",
   "description": "Market regime dashboard + 3-screener scanner with shortlist, plus a full Trade Journal: import broker fills, per-trade charts, setup detection, analytics. All in one extension.",
-  "permissions": ["storage", "unlimitedStorage", "windows"],
+  "permissions": ["storage", "unlimitedStorage", "windows", "alarms"],
   "host_permissions": [
     "https://scanner.tradingview.com/*",
     "https://query1.finance.yahoo.com/*",
