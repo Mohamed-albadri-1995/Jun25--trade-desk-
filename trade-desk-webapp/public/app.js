@@ -1264,9 +1264,9 @@ function renderFrozenScreenerView() {
       var news = (liveRow && liveRow.news) || r.news || null;
       var newsCell = '—';
       if (news) {
-        var fh = news.finnhub || [], tv = news.tradingview || [];
-        var first = (fh[0] && (fh[0].headline || fh[0].title)) || (tv[0] && (tv[0].title || tv[0].headline)) || '';
-        newsCell = first ? (first.length > 60 ? first.slice(0, 60) + '…' : first) : (fh.length + tv.length) + ' items';
+        var fh = news.finnhub || [], yh = news.yahoo || [];
+        var first = (yh[0] && yh[0].title) || (fh[0] && (fh[0].headline || fh[0].title)) || '';
+        newsCell = first ? (first.length > 60 ? first.slice(0, 60) + '…' : first) : (fh.length + yh.length) + ' items';
       }
       return '<tr class="' + statusCls + '"><td>' + esc(ticker) + '</td>' +
         '<td>' + price + '</td>' +
@@ -2325,7 +2325,7 @@ function renderNewsItems(resp) {
     items.push({ title: n.headline || '', url: n.url || '', source: n.source || 'Finnhub', ts: (n.datetime || 0) * 1000, summary: n.summary || '' });
   });
   items.sort(function(a, b) { return b.ts - a.ts; });
-  items.slice(0, 7).forEach(function(n) {
+  items.forEach(function(n) {
     var tag = _newsTag(n.title);
     var ago = n.ts ? fmtAgo(n.ts) : '';
     html += '<div class="news-item">' +
@@ -2647,7 +2647,7 @@ function buildCard(row) {
 //     stock:   { ...full mapped quote... },   // technicals the card/table consume
 //     context: { themes, broad, broadResolved, secBias, secScore, secHot,
 //                marketBias },                 // Market-tab snapshot, frozen at scan time
-//     news:    { finnhub:[], tradingview:[], fetchedAt } | null  // fetched on demand
+//     news:    { finnhub:[], yahoo:[], edgar:[], fetchedAt } | null  // fetched on demand
 //   }
 // Cards are a pure view of the row — buildCard reads stock/context/news only,
 // never the live marketCtx — so a record stays consistent with the scan that
@@ -2874,9 +2874,10 @@ var REG_COLUMNS = [
   { label: 'PM/ADR', get: function (r) { return regFix(r.stock.pmAdrRatio); } },
   { label: 'News', get: function (r) {
       if (!r.news) return '';
-      var fh = r.news.finnhub || [], tv = r.news.tradingview || [];
-      var first = (fh[0] && (fh[0].headline || fh[0].title)) || (tv[0] && (tv[0].title || tv[0].headline)) || '';
-      if (!first) return (fh.length + tv.length) + ' items @ ' + fmtETTime(r.news.fetchedAt) + ' ET';
+      var fh = r.news.finnhub || [], yh = r.news.yahoo || [];
+      var first = (yh[0] && yh[0].title) || (fh[0] && (fh[0].headline || fh[0].title)) || '';
+      var total = fh.length + yh.length + (r.news.edgar || []).length;
+      if (!first) return total + ' items @ ' + fmtETTime(r.news.fetchedAt) + ' ET';
       return first.length > 60 ? first.slice(0, 60) + '…' : first;
   } }
 ];

@@ -1108,12 +1108,12 @@ app.get('/api/news/:ticker', async (req, res) => {
       for (const host of YH_HOSTS) {
         try {
           const r = await fetch(
-            `https://${host}/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=8&quotesCount=0`,
+            `https://${host}/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=15&quotesCount=0`,
             { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
           if (!r.ok) continue;
           const d = await r.json();
           const items = (d && d.news) || [];
-          if (items.length) return items.slice(0, 8);
+          if (items.length) return items.slice(0, 15);
         } catch (_) {}
       }
       return [];
