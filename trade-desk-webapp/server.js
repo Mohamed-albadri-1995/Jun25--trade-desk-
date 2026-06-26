@@ -770,7 +770,7 @@ function startCronJobs() {
 // ══════════════════════════════════════════════════════════════════
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Status
@@ -870,6 +870,11 @@ app.post('/api/import', (req, res) => {
       trades.forEach(t => { if (t && t.id) saveJournalTrade(t); });
       return res.json({ ok: true, type: 'journalTrades', count: trades.length });
     }
+    if (body._type === 'registry') {
+      const rows = Array.isArray(data) ? data : Object.values(data);
+      rows.forEach(r => { if (r && r.ticker && r.date) upsertRegistryRow(r.ticker, r.date, r); });
+      return res.json({ ok: true, type: 'registry', count: rows.length });
+    }
     res.status(400).json({ ok: false, error: 'Unknown _type: ' + body._type });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -883,7 +888,190 @@ app.get('/api/export/:type', (req, res) => {
   if (type === 'marketSnapshots') return res.json({ _type: 'marketSnapshots', _exported: new Date().toISOString(), data: getAllMarketSnapshots() });
   if (type === 'eodOutcome') return res.json({ _type: 'eodOutcome', _exported: new Date().toISOString(), data: getAllEodOutcome() });
   if (type === 'journalTrades') return res.json({ _type: 'journalTrades', _exported: new Date().toISOString(), data: getJournalTrades() });
+  if (type === 'registry') return res.json({ _type: 'registry', _exported: new Date().toISOString(), data: getRegistry() });
   res.status(404).json({ ok: false, error: 'Unknown type' });
+});
+
+// ── Registry (R0) ─────────────────────────────────────────────────
+app.get('/api/registry', (req, res) => res.json(getRegistry()));
+
+app.post('/api/registry/sync', (req, res) => {
+  const rows = req.body && req.body.rows;
+  if (!Array.isArray(rows)) return res.status(400).json({ ok: false, error: 'rows array required' });
+  rows.forEach(r => { if (r && r.ticker && r.date) upsertRegistryRow(r.ticker, r.date, r); });
+  res.json({ ok: true, count: rows.length });
+});
+
+app.put('/api/registry/:key', (req, res) => {
+  const parts = req.params.key.split('|');
+  if (parts.length !== 2) return res.status(400).json({ ok: false, error: 'key must be TICKER|DATE' });
+  upsertRegistryRow(parts[0], parts[1], req.body);
+  res.json({ ok: true });
+});
+
+app.delete('/api/registry/:key', (req, res) => {
+  const parts = req.params.key.split('|');
+  if (parts.length === 2) db.prepare('DELETE FROM registry WHERE ticker=? AND date=?').run(parts[0], parts[1]);
+  res.json({ ok: true });
+});
+
+// ── Shortlists ────────────────────────────────────────────────────
+app.get('/api/shortlists', (req, res) => {
+  try { res.json(JSON.parse(getSetting('shortlists', '{}'))); }
+  catch { res.json({}); }
+});
+app.put('/api/shortlists', (req, res) => {
+  setSetting('shortlists', JSON.stringify(req.body || {}));
+  res.json({ ok: true });
+});
+
+// ── Generic KV store (settings table) ────────────────────────────
+app.get('/api/kv/:key', (req, res) => {
+  const val = getSetting('kv_' + req.params.key, null);
+  if (val === null) return res.status(404).json({ ok: false, error: 'not found' });
+  res.json({ ok: true, value: val });
+});
+app.put('/api/kv/:key', (req, res) => {
+  const v = req.body && req.body.value !== undefined ? req.body.value : '';
+  setSetting('kv_' + req.params.key, String(v));
+  res.json({ ok: true });
+});
+
+// ── Live Market Data (proxy→buildMarketSnapshot) ──────────────────
+app.get('/api/market', async (req, res) => {
+  try {
+    const [ix, etf] = await Promise.all([fetchMarketData(), fetchSectorETFs()]);
+    const snap = buildMarketSnapshot(ix, etf, []);
+    res.json({ ok: true, data: snap });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ── TradingView scanner proxy (generic body) ─────────────────────
+app.post('/api/tvScan', async (req, res) => {
+  try {
+    const data = await tvScanDirect(req.body);
+    res.json({ ok: true, data: data.data || [] });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ── Ticker profile (Yahoo quoteSummary → sector/industry) ─────────
+app.get('/api/profile/:ticker', async (req, res) => {
+  const ticker = encodeURIComponent(req.params.ticker);
+  const hosts = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+  for (const host of hosts) {
+    try {
+      const r = await fetch(`https://${host}/v10/finance/quoteSummary/${ticker}?modules=assetProfile`,
+        { headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' } });
+      if (!r.ok) continue;
+      const d = await r.json();
+      const res0 = d.quoteSummary && d.quoteSummary.result && d.quoteSummary.result[0];
+      const ap = res0 && res0.assetProfile;
+      return res.json({ sector: (ap && ap.sector) || '', industry: (ap && ap.industry) || '' });
+    } catch (_) {}
+  }
+  res.json({ sector: '', industry: '' });
+});
+
+// ── Finnhub news proxy ────────────────────────────────────────────
+app.get('/api/news/:ticker', async (req, res) => {
+  const fhKey = getSetting('kv_smb_jnl_finnhub_key', '') || getSetting('finnhubKey', '');
+  if (!fhKey) return res.json({ ok: true, finnhub: [], tradingview: [] });
+  const to = new Date(), from = new Date(Date.now() - 7 * 86400000);
+  const fmt = d => d.toISOString().slice(0, 10);
+  try {
+    const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(req.params.ticker)}&from=${fmt(from)}&to=${fmt(to)}&token=${fhKey}`;
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const articles = r.ok ? await r.json() : [];
+    res.json({ ok: true, finnhub: Array.isArray(articles) ? articles.slice(0, 15) : [], tradingview: [] });
+  } catch { res.json({ ok: true, finnhub: [], tradingview: [] }); }
+});
+
+// ── Chart history (Yahoo: daily bars or 1m intraday) ──────────────
+app.get('/api/chart/:ticker', async (req, res) => {
+  const ticker = req.params.ticker;
+  const range = req.query.range || '6mo';
+  const interval = req.query.interval || '1d';
+  try {
+    const bars = interval === '1m'
+      ? await fetchYahooIntraday(ticker)
+      : await fetchDailyHistory(ticker, range);
+    if (!bars) return res.json({ ok: true, candles: [] });
+    // LightweightCharts candlestick format: { time, open, high, low, close }
+    const candles = bars.map(b => {
+      if (b.hhmm) return null; // intraday bars from fetchYahooIntraday aren't charted this way
+      return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
+    }).filter(Boolean);
+    res.json({ ok: true, candles });
+  } catch (err) { res.json({ ok: false, error: err.message, candles: [] }); }
+});
+
+// ── Candles for journal per-trade chart (Yahoo only fallback) ─────
+app.get('/api/candles/:ticker', async (req, res) => {
+  const ticker = req.params.ticker;
+  const resolution = req.query.resolution || 'daily';
+  const fromMs = parseInt(req.query.fromMs) || 0;
+  const toMs = parseInt(req.query.toMs) || Date.now();
+
+  try {
+    if (resolution === 'daily') {
+      const rangeStr = '1mo';
+      const bars = await fetchDailyHistory(ticker, rangeStr);
+      if (!bars) return res.json({ ok: true, candles: [] });
+      const candles = bars
+        .filter(b => {
+          const t = new Date(b.time).getTime();
+          return (!fromMs || t >= fromMs) && (!toMs || t <= toMs);
+        })
+        .map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
+      return res.json({ ok: true, candles });
+    }
+    // Intraday (1m or 5m) — Yahoo only supports 1m, last ~30 days
+    const bars = await fetchYahooIntraday(ticker);
+    if (!bars) return res.json({ ok: true, candles: [] });
+    // Convert hhmm bars to Unix seconds for LightweightCharts
+    const dateStr = new Date(toMs || Date.now()).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const candles = bars.map(b => {
+      const [hh, mm] = (b.hhmm || '').split(':').map(Number);
+      const d = new Date(`${dateStr}T${String(hh).padStart(2,'0')}:${String(mm || 0).padStart(2,'0')}:00`);
+      const epoch = Math.floor(d.getTime() / 1000);
+      return { time: epoch, open: b.open, high: b.high, low: b.low, close: b.close };
+    }).filter(c => c.time > 0);
+    // For 5m resolution, downsample 1m → 5m
+    if (String(resolution) === '5') {
+      const grouped = {};
+      candles.forEach(c => {
+        const slot = Math.floor(c.time / 300) * 300;
+        if (!grouped[slot]) grouped[slot] = { time: slot, open: c.open, high: c.high, low: c.low, close: c.close };
+        else { grouped[slot].high = Math.max(grouped[slot].high, c.high); grouped[slot].low = Math.min(grouped[slot].low, c.low); grouped[slot].close = c.close; }
+      });
+      return res.json({ ok: true, candles: Object.values(grouped).sort((a,b) => a.time - b.time) });
+    }
+    res.json({ ok: true, candles });
+  } catch (err) { res.json({ ok: false, error: err.message, candles: [] }); }
+});
+
+// ── Journal sync (full replace — handles deletes too) ─────────────
+app.post('/api/journal/sync', (req, res) => {
+  const trades = req.body && req.body.trades;
+  if (!Array.isArray(trades)) return res.status(400).json({ ok: false, error: 'trades array required' });
+  const ids = trades.filter(t => t && t.id).map(t => t.id);
+  trades.filter(t => t && t.id).forEach(t => saveJournalTrade(t));
+  if (ids.length > 0) {
+    const ph = ids.map(() => '?').join(',');
+    db.prepare(`DELETE FROM journal_trades WHERE id NOT IN (${ph})`).run(...ids);
+  } else {
+    db.prepare('DELETE FROM journal_trades').run();
+  }
+  res.json({ ok: true, count: ids.length });
+});
+
+// ── Journal import (add/update, no deletes) ───────────────────────
+app.post('/api/journal/import', (req, res) => {
+  const trades = req.body && req.body.trades;
+  if (!Array.isArray(trades)) return res.status(400).json({ ok: false, error: 'trades array required' });
+  let count = 0;
+  trades.forEach(t => { if (t && t.id) { saveJournalTrade(t); count++; } });
+  res.json({ ok: true, count });
 });
 
 // Fallback → SPA
