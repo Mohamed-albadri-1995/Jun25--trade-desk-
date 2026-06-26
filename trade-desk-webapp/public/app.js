@@ -5374,7 +5374,7 @@ async function jnl_loadAndRenderChart(trade, resolution) {
   var tradeDateStr = trade.date;
   var etOff = jnl_etOffsetMs(tradeDateStr);
   var dayStartUtc = new Date(tradeDateStr + "T00:00:00Z").getTime();
-  var fromDayMs = dayStartUtc + 4 * 36e5 + etOff;
+  var fromDayMs = dayStartUtc + 9 * 36e5 + etOff;
   var toMs = dayStartUtc + 20.5 * 36e5 + etOff;
   var mondayStr = jnl_getMonday(tradeDateStr);
   var mondayEtOff = jnl_etOffsetMs(mondayStr);
@@ -9656,14 +9656,12 @@ function jnl_renderChart(trade, allCandles, dayCandles, dailyCandles, resolution
   var entryT = Math.floor(trade.entryTs / 6e4) * 60;
   var exitT = trade.exitTs ? Math.floor(trade.exitTs / 6e4) * 60 : entryT + 3600;
   chart.timeScale().fitContent();
-  if ((resolution || 1) <= 1) {
-    requestAnimationFrame(function() {
-      chart.timeScale().setVisibleRange({
-        from: entryT - 1800,
-        to: exitT + 1800
-      });
+  requestAnimationFrame(function() {
+    chart.timeScale().setVisibleRange({
+      from: entryT - 1800,
+      to: exitT + 2700
     });
-  }
+  });
   var volChart = LW.createChart(volEl, Object.assign({
     width: volEl.offsetWidth || 760,
     height: volEl.offsetHeight || 80,
