@@ -1112,42 +1112,8 @@ app.get('/api/news/:ticker', async (req, res) => {
       { headers: { 'User-Agent': 'Mozilla/5.0' } }
     ).then(r => r.ok ? r.json() : []).catch(() => []) : Promise.resolve([]),
 
-    // Yahoo Finance news — RSS feed (public, no auth needed) with JSON fallback
+    // Yahoo Finance news — JSON search API (confirmed working from EC2)
     (async () => {
-      // Primary: Yahoo Finance RSS — reliable public endpoint
-      try {
-        const r = await fetch(
-          `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(ticker)}&region=US&lang=en-US`,
-          { headers: { 'User-Agent': 'Mozilla/5.0' } });
-        if (r.ok) {
-          const xml = await r.text();
-          const items = [];
-          const itemRe = /<item>([\s\S]*?)<\/item>/g;
-          let m;
-          while ((m = itemRe.exec(xml)) !== null) {
-            const x = m[1];
-            const getTag = (tag) => {
-              const cdm = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/${tag}>`, 'i').exec(x);
-              if (cdm) return cdm[1].trim();
-              const plm = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i').exec(x);
-              return plm ? plm[1].trim() : '';
-            };
-            const title = getTag('title');
-            const link  = getTag('link') || getTag('guid');
-            const pub   = getTag('pubDate');
-            const desc  = getTag('description').replace(/<[^>]+>/g, '').slice(0, 300);
-            if (!title) continue;
-            items.push({
-              title, link,
-              publisher: 'Yahoo Finance',
-              providerPublishTime: pub ? Math.floor(new Date(pub).getTime() / 1000) : 0,
-              summary: desc
-            });
-          }
-          if (items.length) return items.slice(0, 15);
-        }
-      } catch (_) {}
-      // Fallback: JSON search API
       for (const host of YH_HOSTS) {
         try {
           const r = await fetch(
