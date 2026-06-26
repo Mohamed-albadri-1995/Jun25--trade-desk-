@@ -2428,7 +2428,15 @@ function newsHostInner(ticker, tvSymbol, newsId, news) {
       '" data-newsid="' + esc(newsId) + '">' + label + '</button>';
   };
   if (news) {
-    return renderNewsItems(news) +
+    var catalyst = _getCatalyst(news);
+    var catBadge = '';
+    if (catalyst) {
+      var cc = catalyst.color || '#f59e0b';
+      catBadge = '<div style="margin:0 0 6px">' +
+        '<span style="display:inline-block;font-size:11px;font-weight:700;color:' + cc + ';border:1px solid ' + cc + ';border-radius:4px;padding:1px 7px">' +
+        '⚡ ' + esc(catalyst.label) + '</span></div>';
+    }
+    return catBadge + renderNewsItems(news) +
       '<div class="sub9" style="margin-top:4px">Fetched ' + esc(fmtETTime(news.fetchedAt)) + ' ET · ' + btn('↻ refresh') + '</div>';
   }
   return btn('📰 Load recent news');
@@ -2640,18 +2648,9 @@ function buildCard(row) {
     ltLine + mtLine + stLine + rgLine +
     '</div>';
 
-  var catalystBadge = '';
-  if (row.catalyst && row.catalyst.label) {
-    var cc = row.catalyst.color || '#f59e0b';
-    catalystBadge = '<div style="margin:4px 0 2px">' +
-      '<span style="display:inline-block;font-size:11px;font-weight:700;color:' + cc + ';border:1px solid ' + cc + ';border-radius:4px;padding:1px 7px">' +
-      '⚡ ' + esc(row.catalyst.label) + '</span></div>';
-  }
-
   var newsId = 'news-' + String(s.ticker).replace(/[^A-Za-z0-9]/g, '');
   var newsBlock = '<div class="ctx-block">' +
     '<div class="ctx-hdr">📰 NEWS</div>' +
-    catalystBadge +
     '<div id="' + newsId + '" class="news-host">' +
       newsHostInner(s.ticker, s.tvSymbol, newsId, row.news) +
     '</div></div>';
