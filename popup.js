@@ -3269,7 +3269,7 @@ document.addEventListener('DOMContentLoaded', function () {
   if (chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener(function (msg) {
       if (!msg) return;
-      if (msg.type === 'SNAPSHOT_UPDATED') { renderAllRegisters(); }
+      if (msg.type === 'SNAPSHOT_UPDATED') { renderAllRegisters(); refreshMarket(); }
       if (msg.type === 'AUTO_FREEZE_REQUEST' && settings.snapshotMode === 'auto') { doFreezeScreener(); }
       if (msg.type === 'BG_SCAN_COMPLETE') {
         loadRegistry().then(function () {

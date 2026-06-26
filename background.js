@@ -740,7 +740,8 @@ function bg_runScreener(key) {
 }
 
 // Run all 3 screeners, upsert results into registry storage.
-var bg_preScanDoneDate = null;
+var BG_SCAN_SLOTS = ['07:00', '08:00', '09:00', '09:20', '09:28'];
+var bg_preScanDoneSlots = {};  // "YYYY-MM-DD|HH:MM" → true
 var bg_eodOutcomeDoneDate = null;
 async function bg_preScan() {
   var today = bg_etDateStr(), now = Date.now();
@@ -997,13 +998,12 @@ chrome.alarms.onAlarm.addListener(async function (alarm) {
   var mode = (r.settings && r.settings.snapshotMode) || 'manual';
   if (mode !== 'auto') return;
 
-  // 09:28 ET: pre-scan — run screeners just before market open.
-  // Gives 7 min of freshness at the 09:35 freeze (bg check uses 15-min window).
   var hhmm = bg_getETHHMM();
-  if (hhmm === '09:28') {
+  if (BG_SCAN_SLOTS.indexOf(hhmm) !== -1) {
     var today = bg_etDateStr();
-    if (bg_preScanDoneDate !== today) {
-      bg_preScanDoneDate = today;
+    var slotKey = today + '|' + hhmm;
+    if (!bg_preScanDoneSlots[slotKey]) {
+      bg_preScanDoneSlots[slotKey] = true;
       await bg_preScan();
     }
   }
