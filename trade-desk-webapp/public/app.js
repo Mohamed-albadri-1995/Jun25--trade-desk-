@@ -1541,7 +1541,7 @@ function exportFrozenScreenerCsv() {
         pm_high: n(s.pmHigh), pm_low: n(s.pmLow), pm_range: n(s.pmRange),
         adr_pct: n(s.adrPct), month_range_pos: n(s.monthRangePos), pm_adr_ratio: n(s.pmAdrRatio),
         mcap: n(s.mcap), float_shares: n(s.floatShares), short_float: n(s.shortFloat),
-        rvol: n(s.rvol), rvat: n(s.rvat), catalyst: (r.catalyst && r.catalyst.label) || '',
+        rvol: n(s.rvol), rvat: n(s.rvat), catalyst: _catalystLabel(r),
         sector: s.sector || '', industry: s.industry || '',
         st_bias: ctx.shortTerm || '', lt_bias: ctx.longTerm || '',
         lt_label: ctx.longTermLabel || '', mid_term: ctx.midTerm || '',
@@ -2043,7 +2043,7 @@ function exportMergedRegisterCsv() {
           pm_high: n(st.pmHigh), pm_low: n(st.pmLow), pm_range: n(st.pmRange),
           adr_pct: n(st.adrPct), month_range_pos: n(st.monthRangePos), pm_adr_ratio: n(st.pmAdrRatio),
           mcap: n(st.mcap), float_shares: n(st.floatShares), short_float: n(st.shortFloat),
-          rvol: n(st.rvol), rvat: n(st.rvat), catalyst: (row.catalyst && row.catalyst.label) || '',
+          rvol: n(st.rvol), rvat: n(st.rvat), catalyst: _catalystLabel(row),
           sector: sec, industry: st.industry || '',
           st_bias: ctx.shortTerm || '', lt_bias: ctx.longTerm || '',
           lt_label: ctx.longTermLabel || '', mid_term: ctx.midTerm || '',
@@ -2704,8 +2704,24 @@ function buildCard(row) {
 // ══════════════════════════════════════════════════════════════════════
 var registry = {};   // id -> row
 
+function _catalystLabel(row) {
+  if (row && row.catalyst && row.catalyst.label) return row.catalyst.label;
+  var c = (row && row.news) ? _getCatalyst(row.news) : null;
+  return c ? c.label : '';
+}
 function loadRegistry() {
-  return storageGet(['registry']).then(function (r) { registry = r.registry || {}; return registry; });
+  return storageGet(['registry']).then(function (r) {
+    registry = r.registry || {};
+    // Back-fill catalyst for any row that has news but no stored catalyst
+    Object.keys(registry).forEach(function (id) {
+      var row = registry[id];
+      if (row && row.news && !row.catalyst) {
+        var c = _getCatalyst(row.news);
+        if (c) row.catalyst = c;
+      }
+    });
+    return registry;
+  });
 }
 function saveRegistry() { return storageSet({ registry: registry }); }
 function regId(ticker, date) { return ticker + '|' + date; }
@@ -2891,7 +2907,7 @@ var REG_COLUMNS = [
   { label: 'VWAP', get: function (r) { return regFix(r.stock.vwap); } },
   { label: 'RVOL', get: function (r) { return regFix(r.stock.rvol); } },
   { label: 'RVAT', get: function (r) { return regFix(r.stock.rvat); } },
-  { label: 'Catalyst', get: function (r) { return (r.catalyst && r.catalyst.label) || ''; } },
+  { label: 'Catalyst', get: function (r) { return _catalystLabel(r); } },
   { label: 'ATR', get: function (r) { return regFix(r.stock.atr); } },
   { label: 'Day H', get: function (r) { return regFix(r.stock.dayHigh); } },
   { label: 'Day L', get: function (r) { return regFix(r.stock.dayLow); } },
