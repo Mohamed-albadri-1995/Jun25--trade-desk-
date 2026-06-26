@@ -509,10 +509,14 @@ function yahooSymbol(sym) {
   return encodeURIComponent(s);
 }
 
-async function fetchYahooIntraday(sym) {
+async function fetchYahooIntraday(sym, fromMs, toMs, intervalMin) {
   const hosts = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
-  const path = '/v8/finance/chart/' + yahooSymbol(sym) + '?range=1d&interval=1m&includePrePost=false';
-  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
+  const interval = (!intervalMin || intervalMin <= 1) ? '1m' : '5m';
+  const p1 = Math.floor((fromMs || (Date.now() - 86400000)) / 1000);
+  const p2 = Math.floor((toMs || Date.now()) / 1000);
+  const path = '/v8/finance/chart/' + yahooSymbol(sym) +
+    '?period1=' + p1 + '&period2=' + p2 +
+    '&interval=' + interval + '&includePrePost=true';
   for (const host of hosts) {
     try {
       const r = await fetch('https://' + host + path, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -526,7 +530,7 @@ async function fetchYahooIntraday(sym) {
       for (let k = 0; k < ts.length; k++) {
         const o = q.open[k], h = q.high[k], l = q.low[k], c = q.close[k];
         if (o == null || h == null || l == null || c == null) continue;
-        bars.push({ hhmm: fmt.format(new Date(ts[k] * 1000)), open: +o, high: +h, low: +l, close: +c });
+        bars.push({ time: ts[k], open: +o, high: +h, low: +l, close: +c });
       }
       if (bars.length) return bars;
     } catch (_) {}
@@ -1137,19 +1141,18 @@ app.get('/api/candles/:ticker', async (req, res) => {
         .map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
       return res.json({ ok: true, candles });
     }
-    // Intraday (1m or 5m) — Yahoo only supports 1m, last ~30 days
-    const bars = await fetchYahooIntraday(ticker);
+    // Intraday — fetch historical data using period1/period2; use 5m for older trades
+    const intervalMin = String(resolution) === '5' ? 5 : 1;
+    const bars = await fetchYahooIntraday(ticker, fromMs, toMs, intervalMin);
     if (!bars) return res.json({ ok: true, candles: [] });
-    // Convert hhmm bars to Unix seconds for LightweightCharts
-    const dateStr = new Date(toMs || Date.now()).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-    const candles = bars.map(b => {
-      const [hh, mm] = (b.hhmm || '').split(':').map(Number);
-      const d = new Date(`${dateStr}T${String(hh).padStart(2,'0')}:${String(mm || 0).padStart(2,'0')}:00`);
-      const epoch = Math.floor(d.getTime() / 1000);
-      return { time: epoch, open: b.open, high: b.high, low: b.low, close: b.close };
-    }).filter(c => c.time > 0);
-    // For 5m resolution, downsample 1m → 5m
-    if (String(resolution) === '5') {
+    // bars[].time is already a UTC Unix second from Yahoo — filter to requested window
+    const fromSec = fromMs ? fromMs / 1000 : 0;
+    const toSec = toMs ? toMs / 1000 : Infinity;
+    const candles = bars
+      .filter(b => b.time >= fromSec && b.time <= toSec)
+      .map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
+    // For 5m resolution requested but 1m data returned, downsample 1m → 5m
+    if (intervalMin === 1 && String(resolution) === '5') {
       const grouped = {};
       candles.forEach(c => {
         const slot = Math.floor(c.time / 300) * 300;

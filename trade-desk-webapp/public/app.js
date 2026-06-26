@@ -9653,15 +9653,7 @@ function jnl_renderChart(trade, allCandles, dayCandles, dailyCandles, resolution
     return a.time - b.time;
   });
   if (markers.length) candleSeries.setMarkers(markers);
-  var entryT = Math.floor(trade.entryTs / 6e4) * 60;
-  var exitT = trade.exitTs ? Math.floor(trade.exitTs / 6e4) * 60 : entryT + 3600;
   chart.timeScale().fitContent();
-  requestAnimationFrame(function() {
-    chart.timeScale().setVisibleRange({
-      from: entryT - 1800,
-      to: exitT + 2700
-    });
-  });
   var volChart = LW.createChart(volEl, Object.assign({
     width: volEl.offsetWidth || 760,
     height: volEl.offsetHeight || 80,
