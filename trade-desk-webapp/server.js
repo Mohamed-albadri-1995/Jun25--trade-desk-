@@ -882,6 +882,56 @@ app.post('/api/eod/backfill', async (req, res) => {
   res.json({ ok: true, ...results });
 });
 
+// Per-date coverage audit across R1/R2/R3
+app.get('/api/data/audit', (req, res) => {
+  const r1Rows = db.prepare('SELECT date, data FROM frozen_screener ORDER BY date ASC').all();
+  const r2Rows = db.prepare('SELECT date, slot, data FROM market_snapshots ORDER BY date ASC, slot ASC').all();
+  const r3Rows = db.prepare('SELECT date, data FROM eod_outcome ORDER BY date ASC').all();
+
+  const r1ByDate = {};
+  r1Rows.forEach(r => { r1ByDate[r.date] = JSON.parse(r.data); });
+
+  const r2ByDate = {};
+  r2Rows.forEach(r => {
+    if (!r2ByDate[r.date]) r2ByDate[r.date] = {};
+    r2ByDate[r.date][r.slot] = JSON.parse(r.data);
+  });
+
+  const r3ByDate = {};
+  r3Rows.forEach(r => { r3ByDate[r.date] = JSON.parse(r.data); });
+
+  const allDates = new Set([
+    ...r1Rows.map(r => r.date),
+    ...r2Rows.map(r => r.date),
+    ...r3Rows.map(r => r.date),
+  ]);
+
+  const dates = Array.from(allDates).sort().reverse().map(date => {
+    const r1 = r1ByDate[date];
+    const r1Tickers = r1 ? Object.keys(r1.rows || {}) : [];
+
+    const r2 = r2ByDate[date] || {};
+    const r2Present = SNAPSHOT_SLOTS.filter(s => r2[s]);
+    const r2Missing = SNAPSHOT_SLOTS.filter(s => !r2[s]);
+    const r2CompleteCount = r2Present.filter(s => r2[s] && r2[s].complete === true).length;
+    const r2IncompleteSlots = r2Present.filter(s => r2[s] && r2[s].complete !== true);
+
+    const r3 = r3ByDate[date];
+    const r3Tickers = r3 ? Object.keys(r3.rows || {}) : [];
+
+    const warn = !r1 || !r1.complete || r2Missing.length > 0 || r2IncompleteSlots.length > 0 || !r3 || !r3.complete;
+    return {
+      date,
+      r1: r1 ? { count: r1Tickers.length, tickers: r1Tickers, slot: r1.slot || '?', capturedAt: r1.capturedAt || '', complete: r1.complete === true } : null,
+      r2: { present: r2Present, missing: r2Missing, incomplete: r2IncompleteSlots, count: r2Present.length, total: SNAPSHOT_SLOTS.length, completeCount: r2CompleteCount },
+      r3: r3 ? { count: r3Tickers.length, tickers: r3Tickers, capturedAt: r3.capturedAt || '', complete: r3.complete === true } : null,
+      status: warn ? 'warn' : 'ok',
+    };
+  });
+
+  res.json({ ok: true, dates, expectedSlots: SNAPSHOT_SLOTS });
+});
+
 // ── Journal ───────────────────────────────────────────────────────
 app.get('/api/journal', (req, res) => res.json(getJournalTrades()));
 app.post('/api/journal', (req, res) => {

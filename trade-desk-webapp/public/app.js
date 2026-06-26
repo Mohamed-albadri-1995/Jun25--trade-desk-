@@ -2090,6 +2090,75 @@ function initRegisterIO() {
         .finally(function () { backfillBtn.disabled = false; });
     });
   }
+
+  var auditBtn = $('btnDataAudit');
+  if (auditBtn) {
+    auditBtn.addEventListener('click', function () {
+      auditBtn.disabled = true;
+      var statusEl = $('auditStatus');
+      var viewEl = $('dataAuditView');
+      if (statusEl) statusEl.textContent = '⏳ Auditing…';
+      if (viewEl) viewEl.innerHTML = '';
+      fetch('/api/data/audit')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.ok) { if (statusEl) statusEl.textContent = '⚠ ' + (d.error || 'Failed'); return; }
+          if (statusEl) statusEl.textContent = d.dates.length + ' date(s) found';
+          if (!viewEl) return;
+          if (!d.dates.length) { viewEl.innerHTML = '<div class="reg-note" style="color:var(--muted)">No data in any register yet.</div>'; return; }
+          var expected = d.expectedSlots || [];
+          var rows = d.dates.map(function (entry) {
+            var r1Cell = entry.r1
+              ? '<span style="color:' + (entry.r1.complete ? '#4ade80' : '#fbbf24') + '">' +
+                (entry.r1.complete ? '✅' : '⚠') + ' ' + entry.r1.count + ' ticker' + (entry.r1.count !== 1 ? 's' : '') +
+                ' @ ' + (entry.r1.capturedAt || entry.r1.slot || '?') + '</span>'
+              : '<span style="color:#f87171">❌ missing</span>';
+
+            var r2Parts = expected.map(function (s) {
+              var present = entry.r2.present.indexOf(s) >= 0;
+              var incomplete = entry.r2.incomplete && entry.r2.incomplete.indexOf(s) >= 0;
+              var color = !present ? '#f87171' : incomplete ? '#fbbf24' : '#4ade80';
+              var label = !present ? '✗' : incomplete ? '~' : '✓';
+              return '<span title="' + s + (incomplete ? ' (incomplete)' : !present ? ' (missing)' : ' (ok)') + '" style="color:' + color + ';font-family:monospace">' + label + '</span>';
+            });
+            var r2Cell = '<span style="font-size:11px">' + r2Parts.join('') + '</span>' +
+              ' <span style="color:var(--muted);font-size:10px">' + entry.r2.completeCount + '/' + entry.r2.total + '</span>';
+            if (entry.r2.missing.length) {
+              r2Cell += '<br><span style="color:#f87171;font-size:10px">Missing: ' + entry.r2.missing.join(', ') + '</span>';
+            }
+
+            var r3Cell = entry.r3
+              ? '<span style="color:' + (entry.r3.complete ? '#4ade80' : '#fbbf24') + '">' +
+                (entry.r3.complete ? '✅' : '⚠') + ' ' + entry.r3.count + ' ticker' + (entry.r3.count !== 1 ? 's' : '') +
+                ' @ ' + (entry.r3.capturedAt || '?') + '</span>'
+              : '<span style="color:#f87171">❌ missing</span>';
+
+            var statusCell = entry.status === 'ok'
+              ? '<span style="color:#4ade80;font-weight:600">✅ OK</span>'
+              : '<span style="color:#fbbf24;font-weight:600">⚠ Gaps</span>';
+
+            return '<tr>' +
+              '<td style="padding:4px 8px;font-weight:600;white-space:nowrap">' + entry.date + '</td>' +
+              '<td style="padding:4px 8px">' + r1Cell + '</td>' +
+              '<td style="padding:4px 8px;line-height:1.6">' + r2Cell + '</td>' +
+              '<td style="padding:4px 8px">' + r3Cell + '</td>' +
+              '<td style="padding:4px 8px;text-align:center">' + statusCell + '</td>' +
+              '</tr>';
+          }).join('');
+          viewEl.innerHTML =
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">' +
+            '<thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid #334155">' +
+            '<th style="padding:4px 8px;text-align:left">Date</th>' +
+            '<th style="padding:4px 8px;text-align:left">R1 Screener</th>' +
+            '<th style="padding:4px 8px;text-align:left">R2 Snapshots (✓=ok ~=incomplete ✗=missing)</th>' +
+            '<th style="padding:4px 8px;text-align:left">R3 EOD</th>' +
+            '<th style="padding:4px 8px;text-align:center">Status</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table>';
+        })
+        .catch(function (err) { if (statusEl) statusEl.textContent = '⚠ ' + err.message; })
+        .finally(function () { auditBtn.disabled = false; });
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════
