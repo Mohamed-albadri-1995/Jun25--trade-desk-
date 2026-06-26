@@ -145,7 +145,7 @@ var TV_COLUMNS = [
   'change_from_open', 'VWAP',
   'High.1M', 'Low.1M', 'high', 'low', 'ATR',
   'short_percentage_of_float', 'float_shares_outstanding',
-  'EMA9', 'EMA13', 'EMA20', 'EMA50', 'SMA5',
+  'EMA9', 'EMA13', 'EMA20', 'EMA50', 'SMA5', 'SMA390|5',
   'premarket_high', 'premarket_low'
 ];
 
@@ -1515,7 +1515,7 @@ var REG1_CSV_HEADERS = [
   'ema9','ema13','ema20','ema50','sma5',
   'month_high','month_low','day_high','day_low','atr',
   'pm_high','pm_low','pm_range','adr_pct','month_range_pos','pm_adr_ratio',
-  'mcap','float_shares','short_float','rvol','sector','industry',
+  'mcap','float_shares','short_float','rvol','rvat','catalyst','sector','industry',
   'st_bias','lt_bias','lt_label','mid_term','mid_term_label',
   'sec_bias','sec_score','sec_hot','market_bias'
 ];
@@ -1541,7 +1541,8 @@ function exportFrozenScreenerCsv() {
         pm_high: n(s.pmHigh), pm_low: n(s.pmLow), pm_range: n(s.pmRange),
         adr_pct: n(s.adrPct), month_range_pos: n(s.monthRangePos), pm_adr_ratio: n(s.pmAdrRatio),
         mcap: n(s.mcap), float_shares: n(s.floatShares), short_float: n(s.shortFloat),
-        rvol: n(s.rvol), sector: s.sector || '', industry: s.industry || '',
+        rvol: n(s.rvol), rvat: n(s.rvat), catalyst: (r.catalyst && r.catalyst.label) || '',
+        sector: s.sector || '', industry: s.industry || '',
         st_bias: ctx.shortTerm || '', lt_bias: ctx.longTerm || '',
         lt_label: ctx.longTermLabel || '', mid_term: ctx.midTerm || '',
         mid_term_label: ctx.midTermLabel || '', sec_bias: ctx.secBias || '',
@@ -1906,7 +1907,7 @@ var MERGED_CSV_HEADERS = [
   'ema9','ema13','ema20','ema50','sma5',
   'month_high','month_low','day_high','day_low','atr',
   'pm_high','pm_low','pm_range','adr_pct','month_range_pos','pm_adr_ratio',
-  'mcap','float_shares','short_float','rvol','sector','industry',
+  'mcap','float_shares','short_float','rvol','rvat','catalyst','sector','industry',
   // R1 context (market conditions at R1 capture time)
   'st_bias','lt_bias','lt_label','mid_term','mid_term_label',
   'sec_bias','sec_score','sec_hot','market_bias',
@@ -1946,7 +1947,7 @@ function renderMergedRegisterView() {
     var tickers = Object.keys(r1Day.rows).sort();
     var html = '<div class="snap-table-wrap"><table class="reg-table">';
     html += '<tr>' +
-      '<th>Ticker</th><th>Sector</th><th>Price</th><th>Gap%</th><th>RVol</th><th>ATR</th>' +
+      '<th>Ticker</th><th>Sector</th><th>Price</th><th>Gap%</th><th>RVOL/RVAT</th><th>ATR</th>' +
       '<th colspan="2" style="border-left:2px solid #4ade80">R3 9:40</th>' +
       '<th>EOD</th>' +
       '<th colspan="4" style="border-left:2px solid #60a5fa">R2 @ 09:35</th>' +
@@ -1971,7 +1972,7 @@ function renderMergedRegisterView() {
       html += '<td style="color:var(--muted);font-size:10px">' + esc(sec) + '</td>';
       html += '<td>' + f2(st.price) + '</td>';
       html += '<td>' + (st.gapPct != null ? st.gapPct.toFixed(1) + '%' : '—') + '</td>';
-      html += '<td>' + f2(st.rvol) + '</td>';
+      html += '<td>' + f2(st.rvol) + '/' + f2(st.rvat) + '</td>';
       html += '<td>' + f2(st.atr) + '</td>';
       html += '<td style="border-left:2px solid #4ade80"' + grn(e3.upR40) + '>' + f2(e3.upR40) + '</td>';
       html += '<td>' + f2(e3.downR40) + '</td>';
@@ -2042,7 +2043,8 @@ function exportMergedRegisterCsv() {
           pm_high: n(st.pmHigh), pm_low: n(st.pmLow), pm_range: n(st.pmRange),
           adr_pct: n(st.adrPct), month_range_pos: n(st.monthRangePos), pm_adr_ratio: n(st.pmAdrRatio),
           mcap: n(st.mcap), float_shares: n(st.floatShares), short_float: n(st.shortFloat),
-          rvol: n(st.rvol), sector: sec, industry: st.industry || '',
+          rvol: n(st.rvol), rvat: n(st.rvat), catalyst: (row.catalyst && row.catalyst.label) || '',
+          sector: sec, industry: st.industry || '',
           st_bias: ctx.shortTerm || '', lt_bias: ctx.longTerm || '',
           lt_label: ctx.longTermLabel || '', mid_term: ctx.midTerm || '',
           mid_term_label: ctx.midTermLabel || '', sec_bias: ctx.secBias || '',
@@ -2235,7 +2237,6 @@ function mapTvRowToStock(item, screenerKey) {
     gapPct: (change != null && cfo != null) ? (change - cfo) : null,
     vwap: num(r['VWAP']),
     ema9: num(r['EMA9']), ema13: num(r['EMA13']), ema20: num(r['EMA20']), ema50: num(r['EMA50']),
-    sma5: num(r['SMA5']),
     monthHigh: monthHigh, monthLow: monthLow,
     dayHigh: num(r['high']), dayLow: num(r['low']), atr: atr,
     pmHigh: pmHigh, pmLow: pmLow, pmRange: pmRange,
@@ -2243,7 +2244,9 @@ function mapTvRowToStock(item, screenerKey) {
     mcap: num(r['market_cap_basic']),
     floatShares: num(r['float_shares_outstanding']),
     shortFloat: num(r['short_percentage_of_float']),
-    rvol: num(r['relative_volume_intraday|5']) || num(r['relative_volume_10d_calc']),
+    rvol:  num(r['relative_volume_10d_calc']),
+    rvat:  num(r['relative_volume_intraday|5']),
+    sma5:  num(r['SMA390|5']) || num(r['SMA5']),
     sector: r['sector'] || '', industry: r['industry'] || ''
   };
 }
@@ -2293,6 +2296,41 @@ function _newsTag(text) {
   }
   return null;
 }
+
+var _CATALYST_RULES = [
+  // EDGAR 8-K with keyword match → specific event type
+  [function(n) { return n.edgar.some(function(f) { return /8-K/.test(f.form); }) && /\bFDA\b|approval|PDUFA|\bNDA\b|\bBLA\b|clinical trial/i.test(n._allText); }, 'FDA / Regulatory', '#60a5fa'],
+  [function(n) { return n.edgar.some(function(f) { return /S-3/.test(f.form); }); }, 'Dilution Risk (S-3)', '#f87171'],
+  [function(n) { return n.edgar.some(function(f) { return /8-K/.test(f.form); }) && /merger|acquisition|takeover|buyout/i.test(n._allText); }, 'M&A Event', '#a78bfa'],
+  [function(n) { return n.edgar.some(function(f) { return /8-K/.test(f.form); }) && /earnings|revenue|\bEPS\b|quarterly/i.test(n._allText); }, 'Earnings', '#34d399'],
+  [function(n) { return n.edgar.some(function(f) { return /8-K/.test(f.form); }) && /partnership|contract|deal|collaboration|agreement/i.test(n._allText); }, 'Business Deal (8-K)', '#67e8f9'],
+  [function(n) { return n.edgar.some(function(f) { return /8-K/.test(f.form); }); }, 'Material Event (8-K)', '#f59e0b'],
+  // Headline-based (no EDGAR filing)
+  [function(n) { return /\bFDA\b|approval|PDUFA|\bNDA\b|\bBLA\b|clinical trial/i.test(n._allText); }, 'FDA / Regulatory', '#60a5fa'],
+  [function(n) { return /short squeeze|short interest|high short/i.test(n._allText); }, 'Short Squeeze', '#fb923c'],
+  [function(n) { return /merger|acquisition|takeover|buyout/i.test(n._allText); }, 'M&A', '#a78bfa'],
+  [function(n) { return /earnings|revenue|\bEPS\b|quarterly|Q[1-4]\b/i.test(n._allText); }, 'Earnings', '#34d399'],
+  [function(n) { return /offering|dilution|secondary|\bshelf\b|at-the-market/i.test(n._allText); }, 'Dilution', '#f87171'],
+  [function(n) { return /partnership|contract|deal|collaboration|licensing/i.test(n._allText); }, 'Business Deal', '#67e8f9'],
+  [function(n) { return /\bupgrade\b|overweight|outperform|buy rating/i.test(n._allText); }, 'Analyst Upgrade', '#86efac'],
+  [function(n) { return /insider|CEO bought|CFO bought|director bought/i.test(n._allText); }, 'Insider Buy', '#fbbf24'],
+  [function(n) { return /lawsuit|litigation|settlement|investigation/i.test(n._allText); }, 'Legal Event', '#f472b6'],
+];
+function _getCatalyst(news) {
+  if (!news) return null;
+  var fh = news.finnhub || [], yh = news.yahoo || [], edgar = news.edgar || [];
+  var texts = [];
+  yh.slice(0, 5).forEach(function(n) { if (n.title) texts.push(n.title); });
+  fh.slice(0, 5).forEach(function(n) { if (n.headline) texts.push(n.headline); });
+  edgar.forEach(function(f) { texts.push((f.form || '') + ' ' + (f.company || '')); });
+  var ctx = { edgar: edgar, _allText: texts.join(' ') };
+  for (var i = 0; i < _CATALYST_RULES.length; i++) {
+    try { if (_CATALYST_RULES[i][0](ctx)) return { label: _CATALYST_RULES[i][1], color: _CATALYST_RULES[i][2] }; }
+    catch (_) {}
+  }
+  return null;
+}
+
 function renderNewsItems(resp) {
   var fh    = (resp && resp.finnhub) || [];
   var yh    = (resp && resp.yahoo)   || [];
@@ -2352,6 +2390,7 @@ function autoFetchNewsQueue(rows) {
     fetchNews(row.ticker, (row.stock && row.stock.tvSymbol) || row.tvSymbol || '')
       .then(function (resp) {
         row.news = { finnhub: resp.finnhub || [], yahoo: resp.yahoo || [], edgar: resp.edgar || [], fetchedAt: Date.now() };
+        row.catalyst = _getCatalyst(row.news);
         saveRegistry();
         var newsId = 'news-' + String(row.ticker).replace(/[^A-Za-z0-9]/g, '');
         var host = document.getElementById(newsId);
@@ -2374,7 +2413,7 @@ function loadCardNews(ticker, tvSymbol, hostId) {
       // News goes into the registry first, then the card renders from it.
       var id = regId(ticker, etDateStr()), row = registry[id];
       var news = { finnhub: resp.finnhub || [], yahoo: resp.yahoo || [], edgar: resp.edgar || [], fetchedAt: Date.now() };
-      if (row) { row.news = news; saveRegistry(); }
+      if (row) { row.news = news; row.catalyst = _getCatalyst(news); saveRegistry(); }
       host.innerHTML = newsHostInner(ticker, tvSymbol, hostId, news);
     })
     .catch(function (e) { host.innerHTML = '<span class="sub9">News unavailable: ' + esc(e.message) + '</span>'; });
@@ -2501,10 +2540,12 @@ function buildCard(row) {
     var sn = s.shortFloat >= 20 ? ' <span class="sub9" style="color:var(--amber)">⚠ high — squeeze risk</span>' : '';
     L.push('<div class="line"><b>Short float:</b> <span style="color:' + sc + '">' + s.shortFloat.toFixed(1) + '%</span>' + sn + '</div>');
   }
-  // RVOL
-  if (s.rvol != null && s.rvol > 0) {
-    var rc = s.rvol >= 3 ? 'pos' : s.rvol >= 1.5 ? '' : 'neg';
-    L.push('<div class="line"><b>RVOL:</b> <span class="' + rc + '">' + s.rvol.toFixed(1) + 'x</span></div>');
+  // RVOL (10d total) + RVAT (intraday, at-time)
+  if ((s.rvol != null && s.rvol > 0) || (s.rvat != null && s.rvat > 0)) {
+    var rvolStr = s.rvol != null && s.rvol > 0 ? '<b>RVOL:</b> <span class="' + (s.rvol >= 3 ? 'pos' : s.rvol >= 1.5 ? '' : 'neg') + '">' + s.rvol.toFixed(1) + 'x</span>' : '';
+    var rvatStr = s.rvat != null && s.rvat > 0 ? '<b>RVAT:</b> <span class="' + (s.rvat >= 3 ? 'pos' : s.rvat >= 1.5 ? '' : 'neg') + '">' + s.rvat.toFixed(1) + 'x</span>' : '';
+    var rvSep = (rvolStr && rvatStr) ? ' &nbsp;\xb7&nbsp; ' : '';
+    L.push('<div class="line">' + rvolStr + rvSep + rvatStr + '</div>');
   }
   // Move (× ATR)
   if (s.dayHigh != null && s.dayLow != null && s.atr != null && s.atr > 0) {
@@ -2599,9 +2640,18 @@ function buildCard(row) {
     ltLine + mtLine + stLine + rgLine +
     '</div>';
 
+  var catalystBadge = '';
+  if (row.catalyst && row.catalyst.label) {
+    var cc = row.catalyst.color || '#f59e0b';
+    catalystBadge = '<div style="margin:4px 0 2px">' +
+      '<span style="display:inline-block;font-size:11px;font-weight:700;color:' + cc + ';border:1px solid ' + cc + ';border-radius:4px;padding:1px 7px">' +
+      '⚡ ' + esc(row.catalyst.label) + '</span></div>';
+  }
+
   var newsId = 'news-' + String(s.ticker).replace(/[^A-Za-z0-9]/g, '');
   var newsBlock = '<div class="ctx-block">' +
     '<div class="ctx-hdr">📰 NEWS</div>' +
+    catalystBadge +
     '<div id="' + newsId + '" class="news-host">' +
       newsHostInner(s.ticker, s.tvSymbol, newsId, row.news) +
     '</div></div>';
@@ -2841,6 +2891,8 @@ var REG_COLUMNS = [
   { label: 'Gap %', get: function (r) { return regFix(r.stock.gapPct); } },
   { label: 'VWAP', get: function (r) { return regFix(r.stock.vwap); } },
   { label: 'RVOL', get: function (r) { return regFix(r.stock.rvol); } },
+  { label: 'RVAT', get: function (r) { return regFix(r.stock.rvat); } },
+  { label: 'Catalyst', get: function (r) { return (r.catalyst && r.catalyst.label) || ''; } },
   { label: 'ATR', get: function (r) { return regFix(r.stock.atr); } },
   { label: 'Day H', get: function (r) { return regFix(r.stock.dayHigh); } },
   { label: 'Day L', get: function (r) { return regFix(r.stock.dayLow); } },
