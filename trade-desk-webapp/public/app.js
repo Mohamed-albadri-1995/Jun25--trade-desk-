@@ -54,7 +54,8 @@ var DEFAULT_SETTINGS = {
   hotCoolDays: 2,
   finnhubKey: '',
   finnhubNews: true,
-  snapshotMode: 'manual'  // 'manual' | 'auto'
+  snapshotMode: 'manual',  // 'manual' | 'auto'
+  journalCsvTz: 3          // hours ahead of UTC for journal CSV imports; 3 = UTC+3 (Saudi Arabia)
 };
 var settings = Object.assign({}, DEFAULT_SETTINGS);
 
@@ -3668,7 +3669,7 @@ function jnl_parseTtpOrders(lines, headers, delim) {
   });
 }
 
-function jnl_parseTvJournal(lines) {
+function jnl_parseTvJournal(lines, offsetH) {
   var execs = [], calls = [], modConfirms = [], modPosEvents = [], posDirs = [];
   var activatedIds = {}, manualIds = {};
   function tick(s) {
@@ -3676,7 +3677,10 @@ function jnl_parseTvJournal(lines) {
   }
   function localTs(str) {
     var m = (str || "").match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
-    return m ? new Date(m[1] + "-" + m[2] + "-" + m[3] + "T" + m[4] + ":" + m[5] + ":" + (m[6] || "00")).getTime() : null;
+    if (!m) return null;
+    // treat CSV timestamp as UTC, then subtract the source timezone offset → true UTC ms
+    var ms = new Date(m[1]+"-"+m[2]+"-"+m[3]+"T"+m[4]+":"+m[5]+":"+(m[6]||"00")+"Z").getTime();
+    return ms - (offsetH || 0) * 36e5;
   }
   for (var i = 1; i < lines.length; i++) {
     var cols = jnl_parseCsvLine(lines[i]);
@@ -3794,7 +3798,7 @@ function jnl_parseTvJournal(lines) {
   return fills;
 }
 
-function jnl_parseCSV(raw) {
+function jnl_parseCSV(raw, offsetH) {
   raw = String(raw == null ? "" : raw).replace(/^﻿/, "");
   var lines = raw.split(/\r?\n/).filter(function(l) {
     return l.trim().length > 0;
@@ -3810,7 +3814,7 @@ function jnl_parseCSV(raw) {
     error: "Could not detect format. Expected TradingView trade log, TradingView journal, or Trade the Pool CSV.",
     fills: []
   };
-  var fills = fmt === "tv" ? jnl_parseTv(lines, headers) : fmt === "tvjournal" ? jnl_parseTvJournal(lines) : fmt === "ttporders" ? jnl_parseTtpOrders(lines, headers, delim) : jnl_parseTtp(lines, headers);
+  var fills = fmt === "tv" ? jnl_parseTv(lines, headers) : fmt === "tvjournal" ? jnl_parseTvJournal(lines, offsetH) : fmt === "ttporders" ? jnl_parseTtpOrders(lines, headers, delim) : jnl_parseTtp(lines, headers);
   return {
     format: fmt,
     fills: fills,
@@ -4217,8 +4221,10 @@ function jnl_fmtDur(ms) {
 
 function jnl_fmtTime(ts) {
   if (!ts) return "—";
-  var d = new Date(ts);
-  return d.getUTCHours().toString().padStart(2, "0") + ":" + d.getUTCMinutes().toString().padStart(2, "0");
+  var dateStr = new Date(ts).toISOString().slice(0, 10);
+  var etMs = ts - jnl_etOffsetMs(dateStr);
+  var et = new Date(etMs);
+  return et.getUTCHours().toString().padStart(2, "0") + ":" + et.getUTCMinutes().toString().padStart(2, "0");
 }
 
 function jnl_computeChecklist(snap, trade) {
@@ -9953,6 +9959,65 @@ function jnl_mergeImported(incoming) {
   };
 }
 
+function jnl_showTzModal(onImport, onCancel) {
+  var saved = settings.journalCsvTz != null ? settings.journalCsvTz : 3;
+  var today = new Date().toISOString().slice(0, 10);
+  var etOffH = -(jnl_etOffsetMs(today) / 36e5);
+  var browserOffH = -(new Date().getTimezoneOffset()) / 60;
+  var presets = [
+    { label: 'UTC+3 — Gulf / Saudi / Moscow', value: 3 },
+    { label: 'UTC', value: 0 },
+    { label: 'ET — Eastern Time (' + (etOffH === -4 ? 'EDT -4h' : 'EST -5h') + ')', value: etOffH },
+    { label: 'Browser local (' + (browserOffH >= 0 ? '+' : '') + browserOffH + 'h)', value: browserOffH }
+  ];
+  var presetValues = presets.map(function(p) { return p.value; });
+  var isCustom = presetValues.indexOf(saved) === -1;
+
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+  var radios = presets.map(function(p) {
+    var chk = (!isCustom && p.value === saved) ? ' checked' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;margin-bottom:9px;cursor:pointer;font-size:13px;">' +
+      '<input type="radio" name="jnlTz" value="' + p.value + '"' + chk + '> ' + p.label + '</label>';
+  }).join('');
+  var customChk = isCustom ? ' checked' : '';
+  var customVal = isCustom ? saved : 0;
+
+  var card = document.createElement('div');
+  card.style.cssText = 'background:#1e293b;border:1px solid #334155;border-radius:8px;padding:24px;max-width:400px;width:90%;color:#e2e8f0;font-size:14px;';
+  card.innerHTML = '<div style="font-weight:600;font-size:15px;margin-bottom:8px;">CSV Timestamp Timezone</div>' +
+    '<div style="color:#94a3b8;font-size:12px;margin-bottom:14px;">What timezone are the timestamps in? (Applies to TradingView journal imports)</div>' +
+    radios +
+    '<label style="display:flex;align-items:center;gap:6px;margin-bottom:16px;cursor:pointer;font-size:13px;">' +
+    '<input type="radio" name="jnlTz" value="custom"' + customChk + '> Custom: UTC' +
+    '<input type="number" id="jnlTzCustom" step="0.5" value="' + customVal + '" style="width:60px;padding:2px 4px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;margin-left:2px;"> h</label>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+    '<button id="jnlTzCancel" style="padding:6px 16px;border:1px solid #475569;background:transparent;color:#94a3b8;border-radius:4px;cursor:pointer;">Cancel</button>' +
+    '<button id="jnlTzOk" style="padding:6px 16px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;">Import</button>' +
+    '</div>';
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+
+  card.querySelector('#jnlTzCancel').addEventListener('click', function() { close(); if (onCancel) onCancel(); });
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) { close(); if (onCancel) onCancel(); } });
+
+  card.querySelector('#jnlTzOk').addEventListener('click', function() {
+    var sel = card.querySelector('input[name="jnlTz"]:checked');
+    if (!sel) return;
+    var val = sel.value === 'custom'
+      ? (parseFloat(card.querySelector('#jnlTzCustom').value) || 0)
+      : parseFloat(sel.value);
+    settings.journalCsvTz = val;
+    saveSettings();
+    close();
+    onImport(val);
+  });
+}
+
 function jnl_handleImport() {
   var ta = document.getElementById("jnl-csv-input");
   var msg = document.getElementById("jnl-import-msg");
@@ -9963,7 +10028,24 @@ function jnl_handleImport() {
     }
     return;
   }
-  var parsed = jnl_parseCSV(ta.value.trim());
+  var raw = ta.value.trim();
+  // Peek format — show timezone modal only for TradingView journal (timestamps lack tz info)
+  var peekLines = raw.split(/\r?\n/).filter(function(l) { return l.trim(); });
+  var peekFmt = null;
+  if (peekLines.length >= 2) {
+    var peekDelim = peekLines[0].split(";").length > peekLines[0].split(",").length ? ";" : ",";
+    peekFmt = jnl_detectFormat(jnl_parseCsvLine(peekLines[0], peekDelim));
+  }
+  if (peekFmt === 'tvjournal') {
+    jnl_showTzModal(function(offsetH) { jnl_doImport(raw, offsetH); }, null);
+  } else {
+    jnl_doImport(raw, 0);
+  }
+}
+
+function jnl_doImport(raw, offsetH) {
+  var msg = document.getElementById("jnl-import-msg");
+  var parsed = jnl_parseCSV(raw, offsetH);
   if (parsed.error) {
     if (msg) {
       msg.textContent = "✕ " + parsed.error;
