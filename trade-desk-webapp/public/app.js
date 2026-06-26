@@ -2069,6 +2069,27 @@ function initRegisterIO() {
       });
     });
   }
+
+  var backfillBtn = $('reg3BackfillEod');
+  if (backfillBtn) {
+    backfillBtn.addEventListener('click', function () {
+      backfillBtn.disabled = true;
+      setIoStatus('reg3IoStatus', '⏳ Backfilling EOD for all dates missing R3…');
+      fetch('/api/eod/backfill', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.ok) { setIoStatus('reg3IoStatus', '⚠ ' + (d.error || 'Failed')); return; }
+          var msg = '✅ Backfilled ' + d.backfilled.length + ' date(s)';
+          if (d.backfilled.length) msg += ': ' + d.backfilled.map(function (x) { return x.date + ' (' + x.count + ')'; }).join(', ');
+          var errKeys = Object.keys(d.errors || {});
+          if (errKeys.length) msg += ' · ⚠ ' + errKeys.length + ' error(s): ' + errKeys.join(', ');
+          setIoStatus('reg3IoStatus', msg);
+          if (d.backfilled.length) renderEodOutcomeView();
+        })
+        .catch(function (err) { setIoStatus('reg3IoStatus', '⚠ ' + err.message); })
+        .finally(function () { backfillBtn.disabled = false; });
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -3238,6 +3259,29 @@ function initSettings() {
       marketCtx.hotStatus = {};
     });
   });
+
+  var exportAllBtn = $('btnExportAll');
+  if (exportAllBtn) {
+    exportAllBtn.addEventListener('click', function () {
+      exportAllBtn.disabled = true;
+      var statusEl = $('exportAllStatus');
+      if (statusEl) statusEl.textContent = '⏳ Exporting…';
+      fetch('/api/export/all')
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function (data) {
+          var date = (data._exported || new Date().toISOString()).slice(0, 10);
+          downloadJSON(data, 'trade-desk-backup-' + date + '.json');
+          if (statusEl) statusEl.textContent = '✅ Exported ' + date;
+        })
+        .catch(function (err) {
+          if (statusEl) statusEl.textContent = '⚠ ' + err.message;
+        })
+        .finally(function () { exportAllBtn.disabled = false; });
+    });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', function () {

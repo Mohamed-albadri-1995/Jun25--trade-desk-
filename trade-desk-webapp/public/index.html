@@ -529,6 +529,7 @@
       <div id="eodOutcomeView"></div>
       <div class="snap-io-bar">
         <button class="btn btn-ghost" id="reg3RunEod">▶ Run Now</button>
+        <button class="btn btn-ghost" id="reg3BackfillEod">⟳ Backfill Missing</button>
         <button class="btn btn-ghost" id="reg3ExportJson">⬇ Backup JSON</button>
         <button class="btn btn-ghost" id="reg3ImportJson">⬆ Restore JSON</button>
         <button class="btn btn-ghost" id="reg3ExportCsv">⬇ Export CSV</button>
@@ -775,6 +776,15 @@
       <button class="btn btn-ghost" id="setClearHist">🗑 Clear hot history</button>
     </div>
     <div class="status" id="setStatus"></div>
+
+    <div class="section">
+      <div class="section-hdr">💾 Data Backup</div>
+      <div class="set-help">Download a full JSON snapshot of all registers (R1 Screener, R2 Snapshots, R3 EOD, R0 Registry, Journal) for safekeeping. The server also auto-exports to <code>backups/YYYY-MM-DD/</code> at 16:30 ET daily.</div>
+      <div class="row">
+        <button class="btn btn-ghost" id="btnExportAll">⬇ Export All Data</button>
+        <span class="snap-io-status" id="exportAllStatus"></span>
+      </div>
+    </div>
   </div>
 
   <!-- ════════════════════ CHART MODAL (Market / Screener) ════════════════════ -->

@@ -762,6 +762,39 @@ function startCronJobs() {
     catch (err) { console.error('[EOD] Failed:', err.message); }
   }, { timezone: TZ });
 
+  // Daily data backup at 16:30 ET — write JSON files then git-commit if git available
+  cron.schedule('30 16 * * 1-5', async () => {
+    const { exec } = require('child_process');
+    const fs = require('fs');
+    const date = etDateStr();
+    const outDir = path.join(__dirname, 'backups', date);
+    try {
+      fs.mkdirSync(outDir, { recursive: true });
+      const ts = new Date().toISOString();
+      const types = [
+        ['frozenScreener',  getAllFrozenScreener()],
+        ['marketSnapshots', getAllMarketSnapshots()],
+        ['eodOutcome',      getAllEodOutcome()],
+        ['registry',        getRegistry()],
+        ['journalTrades',   getJournalTrades()],
+      ];
+      for (const [type, data] of types) {
+        fs.writeFileSync(path.join(outDir, type + '.json'),
+          JSON.stringify({ _type: type, _exported: ts, data }, null, 2));
+      }
+      console.log('[BACKUP] Wrote JSON files to', outDir);
+      // Attempt git commit+push (works only if remote auth is configured on the machine)
+      const repoRoot = path.join(__dirname, '..');
+      const script = path.join(__dirname, 'scripts', 'backup.sh');
+      if (fs.existsSync(script)) {
+        exec('bash "' + script + '"', { cwd: repoRoot }, (err, stdout, stderr) => {
+          if (err) console.error('[BACKUP] git push failed:', err.message);
+          else console.log('[BACKUP] git push OK:', stdout.trim());
+        });
+      }
+    } catch (err) { console.error('[BACKUP] Failed:', err.message); }
+  }, { timezone: TZ });
+
   console.log('[CRON] All jobs scheduled (America/New_York timezone)');
 }
 
@@ -832,6 +865,23 @@ app.post('/api/eod/run', async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Backfill R3 for all R1 dates that have no R3 entry yet
+app.post('/api/eod/backfill', async (req, res) => {
+  const r1Dates = db.prepare('SELECT date FROM frozen_screener ORDER BY date ASC').all().map(r => r.date);
+  const r3Dates = new Set(db.prepare('SELECT date FROM eod_outcome').all().map(r => r.date));
+  const missing = r1Dates.filter(d => !r3Dates.has(d));
+  const results = { backfilled: [], skipped: [], errors: {} };
+  for (const date of missing) {
+    try {
+      const out = await runEodOutcome(date);
+      results.backfilled.push({ date, count: Object.keys(out.rows || {}).length });
+    } catch (err) {
+      results.errors[date] = err.message;
+    }
+  }
+  res.json({ ok: true, ...results });
+});
+
 // ── Journal ───────────────────────────────────────────────────────
 app.get('/api/journal', (req, res) => res.json(getJournalTrades()));
 app.post('/api/journal', (req, res) => {
@@ -889,6 +939,17 @@ app.get('/api/export/:type', (req, res) => {
   if (type === 'eodOutcome') return res.json({ _type: 'eodOutcome', _exported: new Date().toISOString(), data: getAllEodOutcome() });
   if (type === 'journalTrades') return res.json({ _type: 'journalTrades', _exported: new Date().toISOString(), data: getJournalTrades() });
   if (type === 'registry') return res.json({ _type: 'registry', _exported: new Date().toISOString(), data: getRegistry() });
+  if (type === 'all') {
+    const ts = new Date().toISOString();
+    return res.json({
+      _type: 'all', _exported: ts,
+      frozenScreener:  { _type: 'frozenScreener',  _exported: ts, data: getAllFrozenScreener() },
+      marketSnapshots: { _type: 'marketSnapshots', _exported: ts, data: getAllMarketSnapshots() },
+      eodOutcome:      { _type: 'eodOutcome',      _exported: ts, data: getAllEodOutcome() },
+      registry:        { _type: 'registry',         _exported: ts, data: getRegistry() },
+      journalTrades:   { _type: 'journalTrades',    _exported: ts, data: getJournalTrades() },
+    });
+  }
   res.status(404).json({ ok: false, error: 'Unknown type' });
 });
 
