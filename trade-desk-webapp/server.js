@@ -509,6 +509,14 @@ function yahooSymbol(sym) {
   return encodeURIComponent(s);
 }
 
+const _etHhmmFmt = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false
+});
+function _toEtHhmm(epochSec) {
+  const parts = _etHhmmFmt.formatToParts(new Date(epochSec * 1000));
+  return parts.find(p => p.type === 'hour').value + ':' + parts.find(p => p.type === 'minute').value;
+}
+
 async function fetchYahooIntraday(sym, fromMs, toMs, intervalMin) {
   const hosts = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
   const interval = (!intervalMin || intervalMin <= 1) ? '1m' : '5m';
@@ -530,7 +538,8 @@ async function fetchYahooIntraday(sym, fromMs, toMs, intervalMin) {
       for (let k = 0; k < ts.length; k++) {
         const o = q.open[k], h = q.high[k], l = q.low[k], c = q.close[k];
         if (o == null || h == null || l == null || c == null) continue;
-        bars.push({ time: ts[k], open: +o, high: +h, low: +l, close: +c });
+        // time: UTC epoch seconds (for LightweightCharts); hhmm: ET "HH:MM" (for R3 entry matching)
+        bars.push({ time: ts[k], hhmm: _toEtHhmm(ts[k]), open: +o, high: +h, low: +l, close: +c });
       }
       if (bars.length) return bars;
     } catch (_) {}
@@ -1153,10 +1162,7 @@ app.get('/api/chart/:ticker', async (req, res) => {
       : await fetchDailyHistory(ticker, range);
     if (!bars) return res.json({ ok: true, candles: [] });
     // LightweightCharts candlestick format: { time, open, high, low, close }
-    const candles = bars.map(b => {
-      if (b.hhmm) return null; // intraday bars from fetchYahooIntraday aren't charted this way
-      return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
-    }).filter(Boolean);
+    const candles = bars.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
     res.json({ ok: true, candles });
   } catch (err) { res.json({ ok: false, error: err.message, candles: [] }); }
 });
