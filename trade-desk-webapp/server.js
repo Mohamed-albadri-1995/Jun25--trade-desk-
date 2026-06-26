@@ -767,7 +767,8 @@ function startCronJobs() {
     const { exec } = require('child_process');
     const fs = require('fs');
     const date = etDateStr();
-    const outDir = path.join(__dirname, 'backups', date);
+    const dataRepo = process.env.DATA_BACKUP_DIR || path.join(__dirname, 'backups');
+    const outDir = path.join(dataRepo, date);
     try {
       fs.mkdirSync(outDir, { recursive: true });
       const ts = new Date().toISOString();
