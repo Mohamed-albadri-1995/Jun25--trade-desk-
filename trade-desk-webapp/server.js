@@ -950,7 +950,7 @@ app.get('/api/market', async (req, res) => {
 app.post('/api/tvScan', async (req, res) => {
   try {
     const data = await tvScanDirect(req.body);
-    res.json({ ok: true, data: data.data || [] });
+    res.json({ ok: true, data: data });  // return full TV response; popup.js reads resp.data.data
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 

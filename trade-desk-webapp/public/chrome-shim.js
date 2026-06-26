@@ -133,7 +133,7 @@ async function _handleMsg(msg) {
       + '?range=' + (msg.range || '6mo') + '&interval=1d');
     const d = await r.json();
     if (!d.ok) return { ok: false, error: d.error || 'no data' };
-    return { ok: true, candles: d.candles || [] };
+    return { ok: true, bars: d.candles || d.bars || [] };  // popup.js expects 'bars' (bg.js compat)
   }
 
   if (msg.action === 'fetchTickerProfile') {
