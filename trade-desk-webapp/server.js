@@ -1088,18 +1088,47 @@ app.get('/api/profile/:ticker', async (req, res) => {
   res.json({ sector: '', industry: '' });
 });
 
-// ── Finnhub news proxy ────────────────────────────────────────────
+// ── News proxy (Finnhub + TradingView) ───────────────────────────
 app.get('/api/news/:ticker', async (req, res) => {
+  const ticker = req.params.ticker;
   const fhKey = getSetting('kv_smb_jnl_finnhub_key', '') || getSetting('finnhubKey', '');
-  if (!fhKey) return res.json({ ok: true, finnhub: [], tradingview: [] });
   const to = new Date(), from = new Date(Date.now() - 7 * 86400000);
   const fmt = d => d.toISOString().slice(0, 10);
-  try {
-    const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(req.params.ticker)}&from=${fmt(from)}&to=${fmt(to)}&token=${fhKey}`;
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    const articles = r.ok ? await r.json() : [];
-    res.json({ ok: true, finnhub: Array.isArray(articles) ? articles.slice(0, 15) : [], tradingview: [] });
-  } catch { res.json({ ok: true, finnhub: [], tradingview: [] }); }
+
+  const [finnhub, tradingview] = await Promise.all([
+    fhKey ? fetch(
+      `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${fmt(from)}&to=${fmt(to)}&token=${fhKey}`,
+      { headers: { 'User-Agent': 'Mozilla/5.0' } }
+    ).then(r => r.ok ? r.json() : []).catch(() => []) : Promise.resolve([]),
+
+    (async () => {
+      const clients = ['symbol', 'overview', 'widget'];
+      for (const client of clients) {
+        try {
+          const url = `https://news-headlines.tradingview.com/v2/headlines` +
+            `?client=${client}&lang=en&symbol=${encodeURIComponent(ticker)}&category=stock`;
+          const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          if (!r.ok) continue;
+          const d = await r.json();
+          const items = (d && d.items) || (Array.isArray(d) ? d : []);
+          if (items.length) return items.slice(0, 5);
+        } catch (_) {}
+      }
+      // Fallback URL format
+      try {
+        const url = `https://headlines.tradingview.com/api/stories?category=stock&symbol=${encodeURIComponent(ticker)}`;
+        const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (r.ok) {
+          const d = await r.json();
+          const items = (d && d.items) || (Array.isArray(d) ? d : []);
+          if (items.length) return items.slice(0, 5);
+        }
+      } catch (_) {}
+      return [];
+    })()
+  ]);
+
+  res.json({ ok: true, finnhub: Array.isArray(finnhub) ? finnhub.slice(0, 15) : [], tradingview });
 });
 
 // ── Chart history (Yahoo: daily bars or 1m intraday) ──────────────

@@ -947,6 +947,25 @@ async function refreshMarket() {
   $('mktRefresh').disabled = false;
 }
 
+var __mktAutoTimer = null;
+function startMktAutoRefresh() {
+  if (__mktAutoTimer) return;
+  __mktAutoTimer = setInterval(function() {
+    if (document.visibilityState === 'hidden') return;
+    if (!$('mktRefresh').disabled) refreshMarket();
+  }, 30000);
+  var btn = $('mktAutoBtn');
+  if (btn) { btn.textContent = 'Auto ON'; btn.style.background = '#22c55e'; btn.style.color = '#000'; }
+  try { localStorage.setItem('mktAutoRefresh', '1'); } catch (_) {}
+}
+function stopMktAutoRefresh() {
+  clearInterval(__mktAutoTimer);
+  __mktAutoTimer = null;
+  var btn = $('mktAutoBtn');
+  if (btn) { btn.textContent = 'Auto'; btn.style.background = ''; btn.style.color = ''; }
+  try { localStorage.setItem('mktAutoRefresh', '0'); } catch (_) {}
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // SNAPSHOT SYSTEM — Register 1: Frozen Screener / Register 2: Market Snapshots
 // ══════════════════════════════════════════════════════════════════════
@@ -3365,10 +3384,14 @@ document.addEventListener('DOMContentLoaded', function () {
   initRegisterIO();
   $('mktRefresh').addEventListener('click', refreshMarket);
   $('scrRunAll').addEventListener('click', runAllScreeners);
+  $('mktAutoBtn').addEventListener('click', function() {
+    if (__mktAutoTimer) stopMktAutoRefresh(); else startMktAutoRefresh();
+  });
   // load settings first (thresholds + key), then auto-load market
   loadSettings().then(function () {
     initSettings();
     refreshMarket();
+    try { if (localStorage.getItem('mktAutoRefresh') === '1') startMktAutoRefresh(); } catch (_) {}
   });
   // restore the registry + shortlists, then paint today's candidate cards
   // (after shortlists so the ☆/★ state is correct) and the registry table.
