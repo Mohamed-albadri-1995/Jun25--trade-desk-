@@ -950,9 +950,10 @@ async function refreshMarket() {
 var __mktAutoTimer = null;
 function startMktAutoRefresh() {
   if (__mktAutoTimer) return;
-  __mktAutoTimer = setInterval(function() {
+  __mktAutoTimer = setInterval(async function() {
     if (document.visibilityState === 'hidden') return;
-    if (!$('mktRefresh').disabled) refreshMarket();
+    if (!$('mktRefresh').disabled) await refreshMarket();
+    if (!$('scrRunAll').disabled) runAllScreeners();
   }, 30000);
   var btn = $('mktAutoBtn');
   if (btn) { btn.textContent = 'Auto ON'; btn.style.background = '#22c55e'; btn.style.color = '#000'; }
@@ -965,6 +966,31 @@ function stopMktAutoRefresh() {
   if (btn) { btn.textContent = 'Auto'; btn.style.background = ''; btn.style.color = ''; }
   try { localStorage.setItem('mktAutoRefresh', '0'); } catch (_) {}
 }
+
+// Always-on pre-snapshot watchdog — fires 1 min before R1 (screener freeze) and R2 (market snapshot)
+// regardless of whether auto-refresh is toggled on or off.
+var __preSnapFired = {}; // "YYYY-MM-DD HH:MM" → true, prevents double-fire within the same minute
+function __preSnapCheck() {
+  if (document.visibilityState === 'hidden') return;
+  var etHM = etTimeStr().slice(0, 5); // "HH:MM" from "HH:MM:SS"
+  var dateKey = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  var fireKey = dateKey + ' ' + etHM;
+  if (__preSnapFired[fireKey]) return;
+  // 09:34 and 09:39 are 1 min before R1 freeze (09:35, 09:40) → market + screener
+  var isPreR1 = (etHM === '09:34' || etHM === '09:39');
+  // all other pre-R2 times → market only
+  var isPreR2 = ['09:29','09:34','09:39','09:44','09:49','09:54','09:59','11:59','15:44'].indexOf(etHM) !== -1;
+  if (!isPreR1 && !isPreR2) return;
+  __preSnapFired[fireKey] = true;
+  if (isPreR1) {
+    if (!$('mktRefresh').disabled) refreshMarket().then(function() {
+      if (!$('scrRunAll').disabled) runAllScreeners();
+    });
+  } else {
+    if (!$('mktRefresh').disabled) refreshMarket();
+  }
+}
+setInterval(__preSnapCheck, 20000);
 
 // ══════════════════════════════════════════════════════════════════════
 // SNAPSHOT SYSTEM — Register 1: Frozen Screener / Register 2: Market Snapshots
