@@ -1088,47 +1088,58 @@ app.get('/api/profile/:ticker', async (req, res) => {
   res.json({ sector: '', industry: '' });
 });
 
-// ── News proxy (Finnhub + TradingView) ───────────────────────────
+// ── News proxy (Finnhub + Yahoo Finance + SEC EDGAR) ─────────────
 app.get('/api/news/:ticker', async (req, res) => {
   const ticker = req.params.ticker;
   const fhKey = getSetting('kv_smb_jnl_finnhub_key', '') || getSetting('finnhubKey', '');
-  const to = new Date(), from = new Date(Date.now() - 7 * 86400000);
+  const toDate = new Date(), fromDate = new Date(Date.now() - 7 * 86400000);
   const fmt = d => d.toISOString().slice(0, 10);
+  const YH_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
 
-  const [finnhub, tradingview] = await Promise.all([
+  const [finnhub, yahoo, edgar] = await Promise.all([
+    // Finnhub (optional — requires API key, provides article summaries)
     fhKey ? fetch(
-      `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${fmt(from)}&to=${fmt(to)}&token=${fhKey}`,
+      `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${fmt(fromDate)}&to=${fmt(toDate)}&token=${fhKey}`,
       { headers: { 'User-Agent': 'Mozilla/5.0' } }
     ).then(r => r.ok ? r.json() : []).catch(() => []) : Promise.resolve([]),
 
+    // Yahoo Finance news (primary — same hosts already used for charts/profiles)
     (async () => {
-      const clients = ['symbol', 'overview', 'widget'];
-      for (const client of clients) {
+      for (const host of YH_HOSTS) {
         try {
-          const url = `https://news-headlines.tradingview.com/v2/headlines` +
-            `?client=${client}&lang=en&symbol=${encodeURIComponent(ticker)}&category=stock`;
-          const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          const r = await fetch(
+            `https://${host}/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=8&quotesCount=0`,
+            { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
           if (!r.ok) continue;
           const d = await r.json();
-          const items = (d && d.items) || (Array.isArray(d) ? d : []);
-          if (items.length) return items.slice(0, 5);
+          const items = (d && d.news) || [];
+          if (items.length) return items.slice(0, 8);
         } catch (_) {}
       }
-      // Fallback URL format
-      try {
-        const url = `https://headlines.tradingview.com/api/stories?category=stock&symbol=${encodeURIComponent(ticker)}`;
-        const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-        if (r.ok) {
-          const d = await r.json();
-          const items = (d && d.items) || (Array.isArray(d) ? d : []);
-          if (items.length) return items.slice(0, 5);
-        }
-      } catch (_) {}
       return [];
+    })(),
+
+    // SEC EDGAR recent 8-K / S-3 filings (best-effort — reveals catalyst and dilution risk)
+    (async () => {
+      try {
+        const startdt = fmt(fromDate), enddt = fmt(toDate);
+        const url = `https://efts.sec.gov/LATEST/search-index?q=%22${encodeURIComponent(ticker)}%22` +
+          `&forms=8-K,S-3&dateRange=custom&startdt=${startdt}&enddt=${enddt}`;
+        const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
+        if (!r.ok) return [];
+        const d = await r.json();
+        const hits = (d && d.hits && d.hits.hits) || [];
+        return hits.slice(0, 5).map(h => ({
+          form: h._source.form_type || '',
+          date: h._source.file_date || '',
+          company: h._source.entity_name || '',
+          url: h._source.file_url_www || ''
+        }));
+      } catch (_) { return []; }
     })()
   ]);
 
-  res.json({ ok: true, finnhub: Array.isArray(finnhub) ? finnhub.slice(0, 15) : [], tradingview });
+  res.json({ ok: true, finnhub: Array.isArray(finnhub) ? finnhub.slice(0, 10) : [], yahoo, edgar });
 });
 
 // ── Chart history (Yahoo: daily bars or 1m intraday) ──────────────

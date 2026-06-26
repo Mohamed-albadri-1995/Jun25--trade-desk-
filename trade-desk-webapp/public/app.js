@@ -2275,24 +2275,65 @@ function fetchBySymbols(tvSymbols) {
 }
 
 // ── per-card news (lazy-loaded to respect Finnhub's 60/min free limit) ──
-function renderNewsItems(resp) {
-  var fh = (resp && resp.finnhub) || [], tv = (resp && resp.tradingview) || [];
-  if (!fh.length && !tv.length) {
-    var hint = (settings.finnhubNews && !settings.finnhubKey) ? ' <span class="sub9">(add a Finnhub key in ⚙ Settings for summaries)</span>' : '';
-    return '<span class="sub9">No recent news found.' + hint + '</span>';
+var _NEWS_TAGS = [
+  [/\bFDA\b|approval|PDUFA|\bNDA\b|\bBLA\b|\bIND\b|clinical trial/i, 'FDA',       '#60a5fa'],
+  [/earnings|revenue|\bEPS\b|quarterly|Q[1-4]\b/i,                    'Earnings',  '#34d399'],
+  [/merger|acquisition|acqui|takeover|buyout|\bM&A\b/i,               'M&A',       '#a78bfa'],
+  [/\bupgrade\b|overweight|outperform|buy rating/i,                   'Upgrade',   '#86efac'],
+  [/\bdowngrade\b|underweight|underperform|sell rating/i,             'Downgrade', '#f87171'],
+  [/dilution|offering|secondary|\bshelf\b|at-the-market/i,            'Dilution',  '#f87171'],
+  [/short interest|short squeeze/i,                                   'Short',     '#fb923c'],
+  [/insider|CEO bought|CFO bought|director bought/i,                  'Insider',   '#fbbf24'],
+  [/partnership|deal|contract|collaboration|agreement/i,              'Deal',      '#67e8f9'],
+  [/lawsuit|litigation|settlement|\bSEC charge\b|investigation/i,     'Legal',     '#f472b6'],
+];
+function _newsTag(text) {
+  for (var i = 0; i < _NEWS_TAGS.length; i++) {
+    if (_NEWS_TAGS[i][0].test(text)) return { label: _NEWS_TAGS[i][1], color: _NEWS_TAGS[i][2] };
   }
+  return null;
+}
+function renderNewsItems(resp) {
+  var fh    = (resp && resp.finnhub) || [];
+  var yh    = (resp && resp.yahoo)   || [];
+  var edgar = (resp && resp.edgar)   || [];
+  if (!fh.length && !yh.length && !edgar.length)
+    return '<span class="sub9">No recent news found.</span>';
   var html = '';
-  fh.slice(0, 2).forEach(function (n) {
-    html += '<div class="news-item">' +
-      '<a href="' + esc(n.url) + '" target="_blank" rel="noopener noreferrer" class="news-title">' + esc(n.headline) + '</a>' +
-      '<div class="news-meta sub9">' + esc(n.source || 'Finnhub') + (n.ts ? ' · ' + esc(fmtAgo(n.ts)) : '') + '</div>' +
-      (n.summary ? '<div class="news-sum">' + esc(n.summary) + '</div>' : '') +
-      '</div>';
+  // EDGAR filings pinned at top — most actionable for catalyst trading
+  if (edgar.length) {
+    html += '<div class="news-item" style="border-left-color:#f59e0b">' +
+      '<div class="news-meta sub9" style="color:#f59e0b;font-weight:700;margin-bottom:3px">SEC Filings</div>';
+    edgar.forEach(function(f) {
+      var isS3 = /S-3/.test(f.form);
+      var tagColor = isS3 ? '#f87171' : '#86efac';
+      var tagLabel = isS3 ? f.form + ' ⚠ DILUTION' : f.form;
+      html += '<div style="margin-top:2px">' +
+        '<span style="display:inline-block;font-size:10px;font-weight:700;color:' + tagColor + ';border:1px solid ' + tagColor + ';border-radius:3px;padding:0 4px;margin-right:5px">' + esc(tagLabel) + '</span>' +
+        (f.url ? '<a href="' + esc(f.url) + '" target="_blank" rel="noopener noreferrer" class="sub9">' + esc(f.date) + ' \xb7 ' + esc(f.company) + '</a>'
+               : '<span class="sub9">' + esc(f.date) + ' \xb7 ' + esc(f.company) + '</span>') +
+        '</div>';
+    });
+    html += '</div>';
+  }
+  // Merge Yahoo + Finnhub → normalize → sort newest-first
+  var items = [];
+  yh.forEach(function(n) {
+    items.push({ title: n.title || '', url: n.link || '', source: n.publisher || 'Yahoo Finance', ts: (n.providerPublishTime || 0) * 1000, summary: '' });
   });
-  tv.slice(0, 2).forEach(function (n) {
+  fh.forEach(function(n) {
+    items.push({ title: n.headline || '', url: n.url || '', source: n.source || 'Finnhub', ts: (n.datetime || 0) * 1000, summary: n.summary || '' });
+  });
+  items.sort(function(a, b) { return b.ts - a.ts; });
+  items.slice(0, 7).forEach(function(n) {
+    var tag = _newsTag(n.title);
+    var ago = n.ts ? fmtAgo(n.ts) : '';
     html += '<div class="news-item">' +
       '<a href="' + esc(n.url) + '" target="_blank" rel="noopener noreferrer" class="news-title">' + esc(n.title) + '</a>' +
-      '<div class="news-meta sub9">TradingView' + (n.source ? ' · ' + esc(n.source) : '') + (n.ts ? ' · ' + esc(fmtAgo(n.ts)) : '') + '</div>' +
+      '<div class="news-meta sub9" style="margin-top:3px">' +
+        (tag ? '<span style="display:inline-block;font-size:10px;font-weight:700;color:' + tag.color + ';border:1px solid ' + tag.color + ';border-radius:3px;padding:0 4px;margin-right:5px">' + esc(tag.label) + '</span>' : '') +
+        esc(n.source) + (ago ? ' \xb7 ' + ago : '') +
+      '</div>' +
       (n.summary ? '<div class="news-sum">' + esc(n.summary) + '</div>' : '') +
       '</div>';
   });
@@ -2310,7 +2351,7 @@ function autoFetchNewsQueue(rows) {
     var row = toFetch[i++];
     fetchNews(row.ticker, (row.stock && row.stock.tvSymbol) || row.tvSymbol || '')
       .then(function (resp) {
-        row.news = { finnhub: resp.finnhub || [], tradingview: resp.tradingview || [], fetchedAt: Date.now() };
+        row.news = { finnhub: resp.finnhub || [], yahoo: resp.yahoo || [], edgar: resp.edgar || [], fetchedAt: Date.now() };
         saveRegistry();
         var newsId = 'news-' + String(row.ticker).replace(/[^A-Za-z0-9]/g, '');
         var host = document.getElementById(newsId);
@@ -2332,7 +2373,7 @@ function loadCardNews(ticker, tvSymbol, hostId) {
     .then(function (resp) {
       // News goes into the registry first, then the card renders from it.
       var id = regId(ticker, etDateStr()), row = registry[id];
-      var news = { finnhub: resp.finnhub || [], tradingview: resp.tradingview || [], fetchedAt: Date.now() };
+      var news = { finnhub: resp.finnhub || [], yahoo: resp.yahoo || [], edgar: resp.edgar || [], fetchedAt: Date.now() };
       if (row) { row.news = news; saveRegistry(); }
       host.innerHTML = newsHostInner(ticker, tvSymbol, hostId, news);
     })

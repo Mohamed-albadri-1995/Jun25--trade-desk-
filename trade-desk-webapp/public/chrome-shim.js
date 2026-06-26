@@ -118,7 +118,7 @@ async function _handleMsg(msg) {
   if (msg.action === 'news') {
     const r = await fetch('/api/news/' + encodeURIComponent(msg.symbol || ''));
     const d = await r.json();
-    return { ok: true, finnhub: d.finnhub || [], tradingview: d.tradingview || [] };
+    return { ok: true, finnhub: d.finnhub || [], yahoo: d.yahoo || [], edgar: d.edgar || [] };
   }
 
   if (msg.action === 'runEodOutcome') {
