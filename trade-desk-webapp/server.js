@@ -299,6 +299,60 @@ const SECTOR_ETF_MAP = {
 const SECTOR_ETF_REVERSE = {};
 Object.keys(SECTOR_ETF_MAP).forEach(k => { SECTOR_ETF_REVERSE[SECTOR_ETF_MAP[k]] = k; });
 
+// Maps raw TradingView/Yahoo sector & industry names onto the broad ETF-bucket
+// keys in SECTOR_ETF_MAP. Ported verbatim from app.js so the server resolves a
+// stock's sector to the same scored bucket the browser does — otherwise sector
+// bias/score/hot lookups miss for any name that isn't an exact ETF-map key.
+const SECTOR_FALLBACK_MAP = {
+  'technology services': 'Technology', 'packaged software': 'Technology', 'software': 'Technology',
+  'internet software/services': 'Technology', 'data processing services': 'Technology',
+  'semiconductors': 'Electronic Technology', 'electronic components': 'Electronic Technology',
+  'computer processing hardware': 'Electronic Technology', 'telecommunications equipment': 'Electronic Technology',
+  'biotechnology': 'Health Technology', 'pharmaceuticals: major': 'Health Technology',
+  'pharmaceuticals: other': 'Health Technology', 'medical specialties': 'Health Technology',
+  'managed health care': 'Health Services', 'services to the health industry': 'Health Services',
+  'major banks': 'Finance', 'regional banks': 'Finance', 'investment banks/brokers': 'Finance',
+  'real estate investment trusts': 'Finance/Real Estate', 'oil & gas production': 'Energy Minerals',
+  'integrated oil': 'Energy Minerals', 'oilfield services/equipment': 'Energy Minerals',
+  'precious metals': 'Non-Energy Minerals', 'steel': 'Non-Energy Minerals', 'aluminum': 'Non-Energy Minerals',
+  'aerospace & defense': 'Producer Manufacturing', 'industrial machinery': 'Producer Manufacturing',
+  'motor vehicles': 'Consumer Durables', 'apparel/footwear': 'Consumer Non-Durables',
+  'specialty stores': 'Retail Trade', 'internet retail': 'Retail Trade', 'discount stores': 'Retail Trade',
+  'airlines': 'Transportation', 'trucking': 'Transportation', 'railroads': 'Transportation',
+  'major telecommunications': 'Communications', 'electric utilities': 'Utilities',
+  'commercial services': 'Producer Manufacturing',
+  'consumer services': 'Consumer Durables',
+  'distribution services': 'Producer Manufacturing',
+  'industrial services': 'Producer Manufacturing',
+  'process industries': 'Non-Energy Minerals',
+  'financial services': 'Finance',
+  'healthcare': 'Health Technology',
+  'energy': 'Energy Minerals',
+  'consumer cyclical': 'Consumer Durables',
+  'consumer defensive': 'Consumer Non-Durables',
+  'industrials': 'Producer Manufacturing',
+  'basic materials': 'Non-Energy Minerals',
+  'communication services': 'Communications',
+  'real estate': 'Finance/Real Estate'
+};
+function resolveBroadSector(stock) {
+  if (!stock) return null;
+  const sec = (stock.sector || '').toLowerCase().trim();
+  const ind = (stock.industry || '').toLowerCase().trim();
+  if (!sec && !ind) return null;
+  if (sec) {
+    const exact = Object.keys(SECTOR_ETF_MAP).find(k => k.toLowerCase() === sec);
+    if (exact) return exact;
+  }
+  if (sec && SECTOR_FALLBACK_MAP[sec]) return SECTOR_FALLBACK_MAP[sec];
+  if (ind && SECTOR_FALLBACK_MAP[ind]) return SECTOR_FALLBACK_MAP[ind];
+  // guarded substring: multi-word ETF keys only (never bare "Technology")
+  const guard = Object.keys(SECTOR_ETF_MAP).filter(k => /[ /]/.test(k));
+  if (sec) { const g = guard.find(k => sec.indexOf(k.toLowerCase()) !== -1); if (g) return g; }
+  if (ind) { const g2 = guard.find(k => ind.indexOf(k.toLowerCase()) !== -1); if (g2) return g2; }
+  return null;
+}
+
 const REGIME_MATRIX = {
   'BULLISH|UPTREND':'STRONG_UP','BULLISH|PULLBACK':'PULLBACK_BULL','BULLISH|REBOUND':'UP',
   'BULLISH|SIDEWAYS':'CHOP_BULL','BULLISH|DOWNTREND':'CORRECTION',
@@ -770,6 +824,111 @@ async function captureAndSaveSnapshot(slot) {
   }
 }
 
+// ── Catalyst detection (server mirror of app.js _getCatalyst) ──────────────
+// Reuses the same headline/EDGAR rules the browser uses so the catalyst factor
+// isn't blank on server-captured rows. Rules ported verbatim from app.js.
+const CATALYST_RULES = [
+  [n => n.edgar.some(f => /8-K/.test(f.form)) && /\bFDA\b|approval|PDUFA|\bNDA\b|\bBLA\b|clinical trial/i.test(n._allText), 'FDA / Regulatory', '#60a5fa'],
+  [n => n.edgar.some(f => /S-3/.test(f.form)), 'Dilution Risk (S-3)', '#f87171'],
+  [n => n.edgar.some(f => /8-K/.test(f.form)) && /merger|acquisition|takeover|buyout/i.test(n._allText), 'M&A Event', '#a78bfa'],
+  [n => n.edgar.some(f => /8-K/.test(f.form)) && /earnings|revenue|\bEPS\b|quarterly/i.test(n._allText), 'Earnings', '#34d399'],
+  [n => n.edgar.some(f => /8-K/.test(f.form)) && /partnership|contract|deal|collaboration|agreement/i.test(n._allText), 'Business Deal (8-K)', '#67e8f9'],
+  [n => n.edgar.some(f => /8-K/.test(f.form)), 'Material Event (8-K)', '#f59e0b'],
+  [n => /\bFDA\b|approval|PDUFA|\bNDA\b|\bBLA\b|clinical trial/i.test(n._allText), 'FDA / Regulatory', '#60a5fa'],
+  [n => /short squeeze|short interest|high short/i.test(n._allText), 'Short Squeeze', '#fb923c'],
+  [n => /merger|acquisition|takeover|buyout/i.test(n._allText), 'M&A', '#a78bfa'],
+  [n => /earnings|revenue|\bEPS\b|quarterly|Q[1-4]\b/i.test(n._allText), 'Earnings', '#34d399'],
+  [n => /offering|dilution|secondary|\bshelf\b|at-the-market/i.test(n._allText), 'Dilution', '#f87171'],
+  [n => /partnership|contract|deal|collaboration|licensing/i.test(n._allText), 'Business Deal', '#67e8f9'],
+  [n => /\bupgrade\b|overweight|outperform|buy rating/i.test(n._allText), 'Analyst Upgrade', '#86efac'],
+  [n => /insider|CEO bought|CFO bought|director bought/i.test(n._allText), 'Insider Buy', '#fbbf24'],
+  [n => /lawsuit|litigation|settlement|investigation/i.test(n._allText), 'Legal Event', '#f472b6'],
+];
+function getCatalystServer(news) {
+  if (!news) return null;
+  const fh = news.finnhub || [], yh = news.yahoo || [], edgar = news.edgar || [];
+  const texts = [];
+  yh.slice(0, 5).forEach(n => { if (n.title) texts.push(n.title); });
+  fh.slice(0, 5).forEach(n => { if (n.headline) texts.push(n.headline); });
+  edgar.forEach(f => texts.push((f.form || '') + ' ' + (f.company || '')));
+  const ctx = { edgar, _allText: texts.join(' ') };
+  for (const rule of CATALYST_RULES) {
+    try { if (rule[0](ctx)) return { label: rule[1], color: rule[2] }; } catch (_) {}
+  }
+  return null;
+}
+// Fetch recent news for a ticker (finnhub optional + Yahoo + EDGAR). Extracted
+// so both the /api/news route and freezeScreener's catalyst pass can share it.
+async function fetchTickerNews(ticker) {
+  const fhKey = getSetting('kv_smb_jnl_finnhub_key', '') || getSetting('finnhubKey', '');
+  const toDate = new Date(), fromDate = new Date(Date.now() - 7 * 86400000);
+  const fmt = d => d.toISOString().slice(0, 10);
+  const YH_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+  const [finnhub, yahoo, edgar] = await Promise.all([
+    fhKey ? fetch(
+      `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${fmt(fromDate)}&to=${fmt(toDate)}&token=${fhKey}`,
+      { headers: { 'User-Agent': 'Mozilla/5.0' } }
+    ).then(r => r.ok ? r.json() : []).catch(() => []) : Promise.resolve([]),
+    (async () => {
+      for (const host of YH_HOSTS) {
+        try {
+          const r = await fetch(
+            `https://${host}/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=15&quotesCount=0`,
+            { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
+          if (!r.ok) continue;
+          const d = await r.json();
+          const items = (d && d.news) || [];
+          if (items.length) return items.slice(0, 15);
+        } catch (_) {}
+      }
+      return [];
+    })(),
+    (async () => {
+      try {
+        const startdt = fmt(fromDate), enddt = fmt(toDate);
+        const url = `https://efts.sec.gov/LATEST/search-index?q=%22${encodeURIComponent(ticker)}%22` +
+          `&forms=8-K,S-3&dateRange=custom&startdt=${startdt}&enddt=${enddt}`;
+        const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
+        if (!r.ok) return [];
+        const d = await r.json();
+        const hits = (d && d.hits && d.hits.hits) || [];
+        return hits.slice(0, 5).map(h => ({
+          form: h._source.form_type || '', date: h._source.file_date || '',
+          company: h._source.entity_name || '', url: h._source.file_url_www || ''
+        }));
+      } catch (_) { return []; }
+    })()
+  ]);
+  return { finnhub: Array.isArray(finnhub) ? finnhub.slice(0, 10) : [], yahoo, edgar };
+}
+// Resolve a promise or reject after ms — bounds any single network call.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+  ]);
+}
+// Best-effort catalyst lookup for a set of tickers, with bounded concurrency and
+// an overall wall-clock budget so it can never stall the freeze. Returns a map
+// ticker → { label, color }. Fully isolated: any failure yields no catalyst.
+async function fetchCatalystsForTickers(tickers, budgetMs) {
+  const out = {};
+  const deadline = Date.now() + (budgetMs || 25000);
+  const CONC = 8, PER_FETCH_MS = 7000;
+  try {
+    for (let i = 0; i < tickers.length && Date.now() < deadline; i += CONC) {
+      await Promise.all(tickers.slice(i, i + CONC).map(async t => {
+        try {
+          const news = await withTimeout(fetchTickerNews(t), PER_FETCH_MS);
+          const c = getCatalystServer(news);
+          if (c) out[t] = c;
+        } catch (_) {}
+      }));
+    }
+  } catch (_) {}
+  return out;
+}
+
 async function freezeScreener(slot) {
   const date = etDateStr();
   const existing = getFrozenScreener(date);
@@ -796,7 +955,10 @@ async function freezeScreener(slot) {
     if (snap) {
       Object.keys(rows).forEach(ticker => {
         const s = rows[ticker].stock;
-        const sec = (snap.sectors && snap.sectors[s.sector]) || { bias: 'NEUTRAL', score: 0 };
+        // Resolve the stock's raw sector to its broad ETF bucket (same as the
+        // browser) so bias/score/hot match the snapshot's sector keys.
+        const secKey = resolveBroadSector(s) || s.sector;
+        const sec = (snap.sectors && snap.sectors[secKey]) || { bias: 'NEUTRAL', score: 0 };
         rows[ticker].context = {
           secBias: sec.bias, secScore: sec.score,
           shortTerm: (snap.shortTerm && snap.shortTerm.result) || 'NEUTRAL',
@@ -816,6 +978,17 @@ async function freezeScreener(slot) {
         };
       });
     }
+
+    // Best-effort catalyst per stock (news-derived), so the catalyst factor is
+    // populated on server-captured rows for BOTH training (frozen screener rows,
+    // read by buildMergedRows) and scoring (registry rows, read by scoreCard).
+    // Bounded by concurrency + wall-clock budget and fully isolated: a failure
+    // here never blocks or breaks the freeze.
+    try {
+      const catMap = await fetchCatalystsForTickers(Object.keys(rows), 25000);
+      Object.keys(rows).forEach(t => { if (catMap[t]) rows[t].catalyst = catMap[t]; });
+    } catch (e) { console.error(`[${etTimeStr()}] catalyst pass failed: ${e.message}`); }
+
     const complete = Object.keys(rows).every(t => rows[t].stock && rows[t].stock.price != null);
     saveFrozenScreener(date, { slot, capturedAt: etTimeStr(), ts: Date.now(), rows, complete, reason: complete ? '' : 'Some rows incomplete' });
     console.log(`[${etTimeStr()}] R1 frozen: ${date} ${slot} — ${Object.keys(rows).length} stocks, complete=${complete}`);
@@ -842,6 +1015,9 @@ async function freezeScreener(slot) {
         context: r1.context || {},
         score_at_entry: null, score_model_ts: null
       };
+      // Carry the news-derived catalyst onto the registry row so scoreCard's
+      // catalyst factor sees it (prefer freshly fetched, else keep prior).
+      regRow.catalyst = r1.catalyst || regRow.catalyst || null;
       // Stamp score only on first detection (never overwrite)
       if (regRow.score_at_entry == null && modelObj) {
         const s = scoreCard(regRow, modelObj);
@@ -1018,9 +1194,10 @@ function buildMergedRows() {
       const row = r1Day.rows[ticker], st = row.stock || {}, ctx = row.context || {};
       const e3  = (r3Day.rows && r3Day.rows[ticker]) || {};
       const r0Row = allR0[ticker + '|' + date] || {};
-      const sec = st.sector || '';
-      const sb935 = snap935 && snap935.sectors && snap935.sectors[sec] ? snap935.sectors[sec].bias : '';
-      const sb940 = snap940 && snap940.sectors && snap940.sectors[sec] ? snap940.sectors[sec].bias : '';
+      const sec = st.sector || '';                          // raw — feeds the 'sector' factor
+      const secKey = resolveBroadSector(st) || sec;          // broad ETF bucket — feeds snap_sec
+      const sb935 = snap935 && snap935.sectors && snap935.sectors[secKey] ? snap935.sectors[secKey].bias : '';
+      const sb940 = snap940 && snap940.sectors && snap940.sectors[secKey] ? snap940.sectors[secKey].bias : '';
       rows.push({
         date, slot: r1Day.slot || '', captured_at: r1Day.capturedAt || '',
         last_refreshed_at: row.lastUpdated ? new Date(row.lastUpdated).toISOString() : '',
@@ -1404,56 +1581,8 @@ app.post('/api/opens', async (req, res) => {
 
 // ── News proxy (Finnhub + Yahoo Finance + SEC EDGAR) ─────────────
 app.get('/api/news/:ticker', async (req, res) => {
-  const ticker = req.params.ticker;
-  const fhKey = getSetting('kv_smb_jnl_finnhub_key', '') || getSetting('finnhubKey', '');
-  const toDate = new Date(), fromDate = new Date(Date.now() - 7 * 86400000);
-  const fmt = d => d.toISOString().slice(0, 10);
-  const YH_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
-
-  const [finnhub, yahoo, edgar] = await Promise.all([
-    // Finnhub (optional — requires API key, provides article summaries)
-    fhKey ? fetch(
-      `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${fmt(fromDate)}&to=${fmt(toDate)}&token=${fhKey}`,
-      { headers: { 'User-Agent': 'Mozilla/5.0' } }
-    ).then(r => r.ok ? r.json() : []).catch(() => []) : Promise.resolve([]),
-
-    // Yahoo Finance news — JSON search API (confirmed working from EC2)
-    (async () => {
-      for (const host of YH_HOSTS) {
-        try {
-          const r = await fetch(
-            `https://${host}/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=15&quotesCount=0`,
-            { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
-          if (!r.ok) continue;
-          const d = await r.json();
-          const items = (d && d.news) || [];
-          if (items.length) return items.slice(0, 15);
-        } catch (_) {}
-      }
-      return [];
-    })(),
-
-    // SEC EDGAR recent 8-K / S-3 filings (best-effort — reveals catalyst and dilution risk)
-    (async () => {
-      try {
-        const startdt = fmt(fromDate), enddt = fmt(toDate);
-        const url = `https://efts.sec.gov/LATEST/search-index?q=%22${encodeURIComponent(ticker)}%22` +
-          `&forms=8-K,S-3&dateRange=custom&startdt=${startdt}&enddt=${enddt}`;
-        const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
-        if (!r.ok) return [];
-        const d = await r.json();
-        const hits = (d && d.hits && d.hits.hits) || [];
-        return hits.slice(0, 5).map(h => ({
-          form: h._source.form_type || '',
-          date: h._source.file_date || '',
-          company: h._source.entity_name || '',
-          url: h._source.file_url_www || ''
-        }));
-      } catch (_) { return []; }
-    })()
-  ]);
-
-  res.json({ ok: true, finnhub: Array.isArray(finnhub) ? finnhub.slice(0, 10) : [], yahoo, edgar });
+  const data = await fetchTickerNews(req.params.ticker);
+  res.json({ ok: true, finnhub: data.finnhub, yahoo: data.yahoo, edgar: data.edgar });
 });
 
 // ── Chart history (Yahoo: daily bars or 1m intraday) ──────────────
