@@ -180,18 +180,23 @@ var SCORE_FACTORS = [
     id: 'ema_stack',
     getValue: function(row) {
       var s = row.stock;
-      if (!s || s.ema9 == null || s.ema13 == null || s.ema20 == null || s.ema50 == null) return null;
-      var a = s.ema9  > s.ema13;
-      var b = s.ema13 > s.ema20;
-      var c = s.ema20 > s.ema50;
-      if ( a &&  b &&  c) return '9>13>20>50 (full bull)';
-      if ( a &&  b && !c) return '9>13>20, below 50';
-      if (!a &&  b &&  c) return '13>20>50, 9 lagging';
-      if (!a &&  b && !c) return '13>20 only';
-      if ( a && !b &&  c) return '9>13, 13<20, above 50';
-      if ( a && !b && !c) return '9>13 only';
-      if (!a && !b &&  c) return 'Below cloud, above 50';
-      return '9<13<20<50 (full bear)';
+      if (!s || s.price == null || s.ema9 == null || s.ema13 == null || s.ema20 == null || s.ema50 == null) return null;
+      var A = s.price > s.ema9;
+      var B = s.ema9  > s.ema13;
+      var C = s.ema13 > s.ema20;
+      var D = s.ema20 > s.ema50;
+      if ( A &&  B &&  C &&  D) return 'p>9>13>20>50 (full bull)';
+      if (!A && !B && !C && !D) return 'p<9<13<20<50 (full bear)';
+      if (!A &&  B &&  C &&  D) return '9>13>20>50, p below EMA9';
+      if ( A &&  B &&  C && !D) return 'p>9>13>20, below EMA50';
+      if (!A &&  B &&  C && !D) return '9>13>20, p below EMA9, below EMA50';
+      if ( A && !B &&  C &&  D) return 'p>EMA9, 13>20>50, EMA9 lagging';
+      if (!A && !B &&  C &&  D) return '13>20>50, price & EMA9 lagging';
+      if ( A && !B && !C &&  D) return 'p>EMA9, EMA20>50, middle mixed';
+      if (!A && !B && !C &&  D) return 'EMA20>50 only, rest bearish';
+      if ( A &&  B && !C && !D) return 'p>EMA9>13, below EMA20/50';
+      if ( A && !B && !C && !D) return 'p>EMA9 only, EMAs bearish';
+      return 'Mixed stack';
     },
     matchBracket: function(val, brackets) {
       return brackets.find(function(b){return b.label === val;}) || null;
