@@ -503,6 +503,69 @@ function buildMarketSnapshot(ix, etf, hot) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// HOT SECTOR state machine (server-side mirror of app.js)
+// ──────────────────────────────────────────────────────────────────
+// Mirrors advanceHot/priorFor from app.js so server-captured snapshots carry
+// the same per-sector 🔥 hot flag the browser computes — letting freezeScreener
+// stamp a faithful context.secHot instead of leaving server rows blind.
+//   ENTER hot: score ≥ immediate instantly, OR ≥ sustained for N sessions.
+//   STAY hot:  while score ≥ floor.
+//   COOL off:  only after score stays below floor for MORE than C sessions.
+// A "session" = one ET day. Same-day re-captures recompute today from the
+// previous session's state (idempotent), so multiple daily slots don't advance
+// it. Thresholds come from the user's synced settings (PUT /api/settings) with
+// the same defaults app.js uses. State is persisted under its OWN settings key
+// (hotState_server) so it never touches the browser's hotState.
+function hotThresholdsServer() {
+  const numOr = (k, d) => { const v = parseFloat(getSetting(k, '')); return isFinite(v) ? v : d; };
+  return {
+    imm:     numOr('hotImmediate', 80),
+    sus:     numOr('hotSustained', 65),
+    susDays: numOr('hotSustainedDays', 2),
+    floor:   numOr('hotFloor', 40),
+    cool:    numOr('hotCoolDays', 2)
+  };
+}
+function advanceHotServer(prev, score, S) {
+  let hot = !!prev.hot, sus = prev.susStreak || 0, below = prev.belowStreak || 0;
+  if (hot) {
+    if (score >= S.floor) { below = 0; }                       // holding above the floor
+    else { below += 1; if (below > S.cool) { hot = false; below = 0; } } // cooled off
+    if (!hot) sus = (score >= S.sus) ? 1 : 0;                  // re-seed entry streak
+  } else {
+    if (score >= S.imm) { hot = true; sus = 0; below = 0; }    // instant entry
+    else if (score >= S.sus) { sus += 1; if (sus >= S.susDays) { hot = true; below = 0; } }
+    else { sus = 0; }
+  }
+  return { hot, susStreak: sus, belowStreak: below };
+}
+function priorForServer(rec, today) {
+  if (!rec) return { hot: false, susStreak: 0, belowStreak: 0 };
+  return rec.date === today ? rec.prev : rec.cur; // same-day recompute vs new session
+}
+// Advance one session for every sector and persist. Returns { name: hotBool }.
+function updateHotStatesServer(sectors, today) {
+  let store; try { store = JSON.parse(getSetting('hotState_server', '{}')) || {}; } catch (_) { store = {}; }
+  const S = hotThresholdsServer();
+  const out = {};
+  Object.keys(sectors || {}).forEach(name => {
+    const sc = sectors[name] && sectors[name].score;
+    if (sc == null || !isFinite(sc)) {
+      // No usable score this capture — preserve the last known hot flag, don't
+      // touch the streak history.
+      out[name] = !!(store[name] && store[name].cur && store[name].cur.hot);
+      return;
+    }
+    const prev = priorForServer(store[name], today);
+    const cur  = advanceHotServer(prev, sc, S);
+    store[name] = { date: today, score: sc, prev, cur };
+    out[name] = cur.hot;
+  });
+  setSetting('hotState_server', JSON.stringify(store));
+  return out;
+}
+
+// ══════════════════════════════════════════════════════════════════
 // EOD OUTCOME (R3) — ported from background.js
 // ══════════════════════════════════════════════════════════════════
 function yahooSymbol(sym) {
@@ -686,6 +749,13 @@ async function captureAndSaveSnapshot(slot) {
       } catch (_) { return []; } })()
     ]);
     const snap = buildMarketSnapshot(ix, etf, hot);
+    // Advance the server hot-sector state machine and stamp per-sector hot into
+    // the snapshot so freezeScreener can read a faithful secHot. Best-effort:
+    // a failure here must never block saving the snapshot.
+    try {
+      const hotMap = updateHotStatesServer(snap.sectors, date);
+      Object.keys(snap.sectors || {}).forEach(name => { snap.sectors[name].hot = !!hotMap[name]; });
+    } catch (e) { console.error(`[${etTimeStr()}] hot-state update failed: ${e.message}`); }
     const nSectors = Object.keys(snap.sectors || {}).length;
     const complete = !!(snap.indices.VIX && snap.indices.VIX.change != null &&
       snap.shortTerm && snap.shortTerm.signals && snap.shortTerm.signals.length >= 6 &&
@@ -735,6 +805,10 @@ async function freezeScreener(slot) {
           longTermLabel: (snap.longTerm && snap.longTerm.label) || '',
           midTerm: (snap.midTerm && snap.midTerm.result) || 'UNKNOWN',
           midTermLabel: (snap.midTerm && snap.midTerm.stageLabel) || '',
+          // secHot from the snapshot's server-computed hot-sector state machine,
+          // so server-captured rows carry a real 🔥 hot label (same algorithm and
+          // thresholds the browser uses) instead of always reading "Not hot".
+          secHot: !!sec.hot,
           // Include regime so the server-stamped score_at_entry uses the same
           // factor set the browser does. scoreCard reads context.regime.slug; the
           // snapshot's regime is the same object analysis trains on (snap*_regime).
