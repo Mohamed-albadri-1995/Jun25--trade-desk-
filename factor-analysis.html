@@ -342,6 +342,7 @@ table.btbl td:first-child{text-align:left;color:var(--txt2)}
 <div id="errBar"></div>
 <div id="content"><div class="empty-msg">Load a merged register CSV to begin analysis.</div></div>
 <div id="correlationSection" style="display:none;padding:0 20px 60px"></div>
+<div id="shortlistSection" style="display:none;padding:0 20px 60px"></div>
 
 <script>
 'use strict';
@@ -601,6 +602,7 @@ function runAnalysis() {
   // ── Statistical correlation summary ──────────────────────────────
   const threshold = Math.max(0.1, parseFloat(document.getElementById('successThreshold').value) || 1.3);
   renderCorrelationSummary(finalRows, threshold, outCol);
+  renderShortlistQuality(_csvRows, outCol, threshold);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -925,6 +927,20 @@ const FACTOR_GROUPS = [
           {label:'+20 to +50',         test:v=>v>20&&v<=50},
           {label:'>+50 (very bullish)', test:v=>v>50},
         ])},
+    ]
+  },
+  {
+    title: '📅 Calendar',
+    factors: [
+      { id:'day_of_week', label:'Day of week', fn: catBrackets(r => {
+          const d = r.date;
+          if (!d) return null;
+          const parts = String(d).split('-');
+          if (parts.length < 3) return null;
+          const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+          return days[new Date(+parts[0], +parts[1]-1, +parts[2]).getDay()] || null;
+        })
+      },
     ]
   },
 ];
@@ -1428,6 +1444,121 @@ function bracketDetailHTML(d) {
 function toggleBracketDetail(id) {
   const el = document.getElementById(id);
   if (el) el.classList.toggle('open');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SHORTLIST QUALITY ANALYSIS
+// Compares shortlisted stocks vs all scanner results for the same day.
+// Uses the in_shortlist column from the merged register.
+// ══════════════════════════════════════════════════════════════════
+function renderShortlistQuality(allRows, outCol, threshold) {
+  const sec = document.getElementById('shortlistSection');
+  if (!sec) return;
+
+  // Only rows that have in_shortlist populated and an outcome
+  const rows = allRows.filter(r => r.in_shortlist === 'true' || r.in_shortlist === 'false');
+  if (!rows.length) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+
+  const isWin = r => {
+    const v = parseFloat(r[outCol]);
+    return isFinite(v) && v >= threshold;
+  };
+
+  // Group by date
+  const byDate = {};
+  rows.forEach(r => {
+    if (!byDate[r.date]) byDate[r.date] = { all: [], shortlisted: [] };
+    byDate[r.date].all.push(r);
+    if (r.in_shortlist === 'true') byDate[r.date].shortlisted.push(r);
+  });
+
+  const dates = Object.keys(byDate).sort();
+
+  // Per-day table: date | total scanned | shortlisted | shortlist win% | all win%
+  let tableRows = '';
+  let totalShort = 0, totalShortWins = 0, totalAll = 0, totalAllWins = 0;
+  dates.forEach(date => {
+    const d = byDate[date];
+    const allN = d.all.length;
+    const slN  = d.shortlisted.length;
+    const allWins  = d.all.filter(isWin).length;
+    const slWins   = d.shortlisted.filter(isWin).length;
+    const allWinPct  = allN  ? (allWins  / allN  * 100).toFixed(0) : '—';
+    const slWinPct   = slN   ? (slWins   / slN   * 100).toFixed(0) : '—';
+    const lift = (slN && allN) ? ((slWins/slN) - (allWins/allN)) * 100 : null;
+    const liftStr = lift !== null ? (lift >= 0 ? '+' : '') + lift.toFixed(0) + '%' : '—';
+    const liftColor = lift > 5 ? '#4ade80' : lift < -5 ? '#f87171' : '#94a3b8';
+    totalShort += slN; totalShortWins += slWins;
+    totalAll   += allN; totalAllWins  += allWins;
+    tableRows += `<tr>
+      <td>${date}</td>
+      <td>${allN}</td>
+      <td>${slN} (${allN ? (slN/allN*100).toFixed(0) : 0}%)</td>
+      <td>${allWinPct}%</td>
+      <td>${slWinPct}%</td>
+      <td style="color:${liftColor};font-weight:700">${liftStr}</td>
+    </tr>`;
+  });
+
+  const totSlPct  = totalShort ? (totalShortWins / totalShort * 100).toFixed(1) : '—';
+  const totAllPct = totalAll   ? (totalAllWins   / totalAll   * 100).toFixed(1) : '—';
+  const totLift   = (totalShort && totalAll)
+    ? ((totalShortWins/totalShort) - (totalAllWins/totalAll)) * 100 : null;
+  const totLiftStr   = totLift !== null ? (totLift >= 0 ? '+' : '') + totLift.toFixed(1) + '%' : '—';
+  const totLiftColor = totLift > 5 ? '#4ade80' : totLift < -5 ? '#f87171' : '#94a3b8';
+
+  // Score distribution comparison (shortlisted vs not shortlisted)
+  const scored = rows.filter(r => r.score_at_entry !== '' && r.score_at_entry != null);
+  let scoreDist = '';
+  if (scored.length) {
+    const bins = ['0–20','20–40','40–60','60–80','80–100'];
+    const binTest = [v=>v<=20, v=>v>20&&v<=40, v=>v>40&&v<=60, v=>v>60&&v<=80, v=>v>80];
+    const slScored = scored.filter(r => r.in_shortlist === 'true');
+    const otScored = scored.filter(r => r.in_shortlist === 'false');
+    let binRows = '';
+    bins.forEach((lbl, i) => {
+      const slC = slScored.filter(r => binTest[i](+r.score_at_entry)).length;
+      const otC = otScored.filter(r => binTest[i](+r.score_at_entry)).length;
+      const slPct = slScored.length ? (slC/slScored.length*100).toFixed(0) : 0;
+      const otPct = otScored.length ? (otC/otScored.length*100).toFixed(0) : 0;
+      binRows += `<tr><td>${lbl}</td>
+        <td>${slC} (${slPct}%)</td>
+        <td>${otC} (${otPct}%)</td></tr>`;
+    });
+    scoreDist = `<div style="margin-top:24px">
+      <div style="font-size:12px;font-weight:700;color:#94a3b8;margin-bottom:8px">Score Distribution at Entry (shortlisted vs skipped)</div>
+      <table class="ctbl"><thead><tr>
+        <th>Score band</th><th>★ Shortlisted</th><th>Skipped</th>
+      </tr></thead><tbody>${binRows}</tbody></table>
+      <div style="font-size:10px;color:#64748b;margin-top:6px">Are you picking the higher-scored cards? Higher shortlisted % in top bands = good selection discipline.</div>
+    </div>`;
+  }
+
+  sec.innerHTML = `
+    <div style="border-top:2px solid #1e3a5f;margin-top:32px;padding-top:24px">
+      <div style="font-size:14px;font-weight:700;color:#7dd3fc;margin-bottom:4px">📋 Shortlist Quality</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:16px">
+        Compares your shortlisted stocks vs all scanner results. Positive lift = your selection is adding value.
+        <br>Threshold: ≥${threshold}R ${outCol}. ${rows.length} total rows, ${rows.filter(r=>r.in_shortlist==='true').length} shortlisted.
+      </div>
+      <table class="ctbl">
+        <thead><tr>
+          <th>Date</th><th>Total scanned</th><th>Shortlisted</th>
+          <th>All win%</th><th>Shortlist win%</th><th>Lift</th>
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+        <tfoot><tr style="font-weight:700;border-top:1px solid #334155">
+          <td>TOTAL</td>
+          <td>${totalAll}</td>
+          <td>${totalShort} (${totalAll ? (totalShort/totalAll*100).toFixed(0) : 0}%)</td>
+          <td>${totAllPct}%</td>
+          <td>${totSlPct}%</td>
+          <td style="color:${totLiftColor}">${totLiftStr}</td>
+        </tr></tfoot>
+      </table>
+      ${scoreDist}
+    </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════

@@ -837,6 +837,8 @@ app.get('/api/merged-register', (req, res) => {
   const allR3 = getAllEodOutcome();
   const allR2 = getAllMarketSnapshots();
   const allR0 = getRegistry();
+  let allShortlists = {};
+  try { allShortlists = JSON.parse(getSetting('shortlists', '{}')); } catch {}
   const n = v => (v != null && isFinite(v)) ? Number(v).toFixed(4) : '';
   const catalystLabel = row => (row && row.catalyst && row.catalyst.label) ? row.catalyst.label : '';
   const rows = [];
@@ -847,6 +849,7 @@ app.get('/api/merged-register', (req, res) => {
     const r2Day   = allR2[date] || {};
     const snap935 = r2Day['09:35'] || null;
     const snap940 = r2Day['09:40'] || null;
+    const slSet   = new Set((allShortlists[date] && allShortlists[date].items || []).map(it => it.ticker));
     Object.keys(r1Day.rows).sort().forEach(ticker => {
       const row = r1Day.rows[ticker], st = row.stock || {}, ctx = row.context || {};
       const e3  = (r3Day.rows && r3Day.rows[ticker]) || {};
@@ -862,6 +865,7 @@ app.get('/api/merged-register', (req, res) => {
         screeners: (row.screenerKeys || []).join('|'),
         score_at_entry: r0Row.score_at_entry != null ? r0Row.score_at_entry : '',
         score_model_ts: r0Row.score_model_ts || '',
+        in_shortlist: slSet.has(ticker) ? 'true' : 'false',
         price: n(st.price), open: n(st.open), change_pct: n(st.change),
         prev_close: n(st.prevClose), gap_pct: n(st.gapPct), vwap: n(st.vwap),
         ema9: n(st.ema9), ema13: n(st.ema13), ema20: n(st.ema20), ema50: n(st.ema50), sma5: n(st.sma5),

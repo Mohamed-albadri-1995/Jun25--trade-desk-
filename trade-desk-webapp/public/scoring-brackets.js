@@ -351,6 +351,24 @@ var SCORE_FACTORS = [
       if (val <= 50)       return brackets.find(function(b){return b.label==='+20 to +50';});
       return                 brackets.find(function(b){return b.label==='>+50 (very bullish)';});
     }
+  },
+
+  // ── Time / Calendar ─────────────────────────────────────────────────
+  {
+    id: 'day_of_week',
+    getValue: function(row) {
+      var d = row.date || (row.stock && row.stock.date);
+      if (!d) return null;
+      var days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      // date string is YYYY-MM-DD; parse as local date to avoid UTC offset shift
+      var parts = String(d).split('-');
+      if (parts.length < 3) return null;
+      var dt = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+      return days[dt.getDay()] || null;
+    },
+    matchBracket: function(val, brackets) {
+      return brackets.find(function(b) { return b.label === val; }) || null;
+    }
   }
 ];
 
