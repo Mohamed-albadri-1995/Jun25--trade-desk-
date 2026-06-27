@@ -402,13 +402,12 @@ function scoreCard(row, model) {
     if (val === null || val === undefined) return;
     var bracket = sf.matchBracket(val, mf.brackets);
     if (!bracket) return;
-    weightedWoE  += mf.V * bracket.woe;
+    weightedWoE  += mf.V * Math.max(-2, Math.min(2, bracket.woe)); // clamp per-factor
     totalWeight  += mf.V;
   });
   if (totalWeight === 0) return null;
-  var raw = weightedWoE / totalWeight;
-  var capped = Math.max(-2, Math.min(2, raw)); // handle uncapped WoE from older models
-  var score = Math.round((capped + 2) / 4 * 100);
+  var raw = weightedWoE / totalWeight; // now guaranteed in [-2, +2]
+  var score = Math.round((raw + 2) / 4 * 100);
   return Math.max(0, Math.min(100, score));
 }
 
