@@ -2215,6 +2215,59 @@ function initRegisterIO() {
 // SCREENER TAB
 // ══════════════════════════════════════════════════════════════════════
 // Map one TradingView scanner row (item.d[] in TV_COLUMNS order) to the rich
+// ── Stock field integrity validator ─────────────────────────────────────────
+// Applied after every TV scan and again after Yahoo open enrichment.
+// Rules: null obviously wrong values; recompute derived fields from source.
+function validateAndCleanStock(s) {
+  // Positive-only fields
+  ['price','open','prevClose','vwap','atr','sma5',
+   'ema9','ema13','ema20','ema50',
+   'monthHigh','monthLow','dayHigh','dayLow',
+   'pmHigh','pmLow','mcap','floatShares','rvol','rvat'
+  ].forEach(function(k) {
+    if (s[k] != null && (s[k] <= 0 || !isFinite(s[k]))) s[k] = null;
+  });
+
+  // shortFloat must be 0–100
+  if (s.shortFloat != null && (s.shortFloat < 0 || s.shortFloat > 100 || !isFinite(s.shortFloat)))
+    s.shortFloat = null;
+
+  // Inverted range guards — null both sides if inverted
+  if (s.dayHigh != null && s.dayLow != null && s.dayHigh < s.dayLow) {
+    s.dayHigh = null; s.dayLow = null;
+  }
+  if (s.monthHigh != null && s.monthLow != null && s.monthHigh < s.monthLow) {
+    s.monthHigh = null; s.monthLow = null;
+  }
+  if (s.pmHigh != null && s.pmLow != null && s.pmHigh < s.pmLow) {
+    s.pmHigh = null; s.pmLow = null;
+  }
+
+  // open below PM low by >15% = TV's stale previous-day open (Yahoo enrichment fallback)
+  if (s.open != null && s.pmLow != null && s.open < s.pmLow * 0.85) {
+    s.open = null;
+    s.gapPct = null;
+  }
+
+  // vwap must sit within the day's trading range
+  if (s.vwap != null && s.dayHigh != null && s.dayLow != null) {
+    if (s.vwap < s.dayLow * 0.9 || s.vwap > s.dayHigh * 1.1) s.vwap = null;
+  }
+
+  // Recompute pmRange from source — pmHigh and pmLow are authoritative
+  s.pmRange = (s.pmHigh != null && s.pmLow != null) ? (s.pmHigh - s.pmLow) : null;
+
+  // Recompute derived fields — these are always computed from their inputs
+  s.adrPct = (s.atr != null && s.price != null && s.price > 0)
+    ? s.atr / s.price * 100 : null;
+  s.monthRangePos = (s.price != null && s.monthHigh != null && s.monthLow != null && s.monthHigh > s.monthLow)
+    ? (s.price - s.monthLow) / (s.monthHigh - s.monthLow) * 100 : null;
+  s.pmAdrRatio = (s.pmRange != null && s.atr != null && s.atr > 0)
+    ? s.pmRange / s.atr : null;
+
+  return s;
+}
+
 // stock object the cards + registry consume. Shared by the filter-based
 // screeners and the symbol-based refresh of earlier candidates.
 function mapTvRowToStock(item, screenerKey) {
@@ -2232,7 +2285,7 @@ function mapTvRowToStock(item, screenerKey) {
   var monthRangePos = (monthHigh != null && monthLow != null && (monthHigh - monthLow) > 0 && close != null)
     ? (close - monthLow) / (monthHigh - monthLow) * 100 : null;
   var pmAdrRatio = (pmRange != null && atr != null && atr > 0) ? (pmRange / atr) : null;
-  return {
+  return validateAndCleanStock({
     ticker: t, screenerKey: screenerKey || null, tvSymbol: String(item.s || ''),
     price: close, open: num(r['open']), change: change,
     prevClose: (close != null && change != null && (1 + change / 100) !== 0) ? close / (1 + change / 100) : null,
@@ -2250,7 +2303,7 @@ function mapTvRowToStock(item, screenerKey) {
     rvat:  num(r['relative_volume_intraday|5']),
     sma5:  num(r['SMA390|5']) || num(r['SMA5']),
     sector: r['sector'] || '', industry: r['industry'] || ''
-  };
+  });
 }
 
 function runScreener(key) {
@@ -2875,6 +2928,7 @@ async function runAllScreeners() {
             s.open = null;
             s.gapPct = null;
           }
+          validateAndCleanStock(s);
         });
         registryUpsertLive(liveStocks, keysByTicker);
       }
