@@ -609,6 +609,13 @@ function runAnalysis() {
   // ── Statistical correlation summary ──────────────────────────────
   const threshold = Math.max(0.1, parseFloat(document.getElementById('successThreshold').value) || 1.3);
   renderCorrelationSummary(finalRows, threshold, outCol);
+
+  // Build the saved model from the FULL post-regime population (not the noise
+  // cut) so its WoE is calibrated to the same distribution the live cards are
+  // drawn from. The noise cut stays a display-only aid for the table above.
+  _modelRows = regimePassed;
+  _modelCorrData = computeCorrData(regimePassed, threshold);
+
   renderShortlistQuality(allRows, outCol, threshold);
 
   // Apply saved verdict filter (element rendered inside renderCorrelationSummary)
@@ -859,7 +866,7 @@ const FACTOR_GROUPS = [
           {label:'$50+',    test:v=>v>=50},
         ])},
       { id:'change_pct', label:'Change % (day)', getValue: r => pf(r,'change_pct'), fn: numBrackets(r => pf(r,'change_pct'), [
-          {label:'<10%',     test:v=>v<10},
+          {label:'<10%',     test:v=>v>=0&&v<10},
           {label:'10–25%',   test:v=>v>=10&&v<25},
           {label:'25–50%',   test:v=>v>=25&&v<50},
           {label:'50–100%',  test:v=>v>=50&&v<100},
@@ -1193,18 +1200,27 @@ function chiSquareAndV(brackets, successTest) {
 // WoE_i = ln(% events in bucket i / % non-events in bucket i).
 // IV = Σ (distrib_events − distrib_nonevents) × WoE.
 // IV interpretation: <0.02 = useless, 0.02–0.1 = weak, 0.1–0.3 = medium, >0.3 = strong.
+// WoE statistics constants (kept in sync with analysis-engine.js).
+//   WOE_SMOOTH — Laplace smoothing so an empty cell can't produce log(0)/±20 WoE.
+//   WOE_CRED_K — shrink each bracket's WoE toward 0 by n/(n+K) so its vote
+//                scales with how many rows back it (~half-trusted at K rows).
+const WOE_SMOOTH = 0.5;
+const WOE_CRED_K = 20;
+
 function infoValue(brackets, successTest) {
   const totalS = brackets.reduce((s, b) => s + b.rows.filter(successTest).length, 0);
   const totalF = brackets.reduce((s, b) => s + b.rows.filter(r => !successTest(r)).length, 0);
   if (!totalS || !totalF) return { iv: 0, detail: [] };
 
+  const k = brackets.length;
   let iv = 0;
   const detail = brackets.map(b => {
     const s  = b.rows.filter(successTest).length;
     const f  = b.rows.length - s;
-    const ds = (s / totalS) || 1e-9;   // distribution of successes
-    const df = (f / totalF) || 1e-9;   // distribution of failures
-    const woe    = Math.log(ds / df);
+    const ds = (s + WOE_SMOOTH) / (totalS + WOE_SMOOTH * k);  // smoothed success share
+    const df = (f + WOE_SMOOTH) / (totalF + WOE_SMOOTH * k);  // smoothed failure share
+    const cred = b.rows.length / (b.rows.length + WOE_CRED_K); // sample-size credibility
+    const woe    = Math.log(ds / df) * cred;
     const contrib = (ds - df) * woe;
     iv += contrib;
     return { label: b.label, n: b.rows.length, s, f, ds, df, woe, contrib };
@@ -1262,8 +1278,46 @@ function spearmanRho(rows, getValue) {
 // ══════════════════════════════════════════════════════════════════
 // CORRELATION SUMMARY RENDERER
 // ══════════════════════════════════════════════════════════════════
-let _corrData = []; // stored for CSV export
-let _finalRows = []; // stored for saveScoringModel()
+let _corrData = [];      // displayed table (noise-cut rows) — CSV export
+let _finalRows = [];     // noise-cut rows backing the displayed table
+let _modelCorrData = []; // FULL-population stats — source for the saved model
+let _modelRows = [];     // full-population rows the saved model is trained on
+
+// Pure correlation computation over an arbitrary row set. Used both for the
+// on-screen table (noise-cut rows) and for the saved scoring model (full
+// population), so the two never drift apart in formula.
+function computeCorrData(rows, threshold) {
+  const successTest = r => r._output >= threshold;
+  const nSuccess    = rows.filter(successTest).length;
+  const out = [];
+  FACTOR_GROUPS.forEach(group => {
+    group.factors.forEach(factor => {
+      const brackets = factor.fn(rows).filter(b => b.rows.length >= 1);
+      if (brackets.length < 2) return;
+
+      const cv    = chiSquareAndV(brackets, successTest);
+      const ivRes = infoValue(brackets, successTest);
+      const η2    = etaSquared(brackets);
+      const rho   = factor.getValue ? spearmanRho(rows, factor.getValue) : null;
+
+      const bracketStats = ivRes.detail.map(d => ({ ...d, rate: d.n ? d.s / d.n : null }));
+
+      const verdict = cv.V >= 0.40                        ? 'strong'
+                    : cv.V >= 0.20 || ivRes.iv >= 0.10    ? 'moderate'
+                    : cv.V >= 0.10 || ivRes.iv >= 0.02    ? 'weak'
+                    : 'noise';
+
+      out.push({
+        group: group.title, factor: factor.label, id: factor.id,
+        V: cv.V, chi2: cv.chi2, df: cv.df, p: cv.p, iv: ivRes.iv,
+        eta2: η2, rho, verdict, bracketStats,
+        basePct: nSuccess / rows.length,
+      });
+    });
+  });
+  out.sort((a, b) => b.V - a.V);
+  return out;
+}
 
 function renderCorrelationSummary(finalRows, threshold, outCol) {
   const sec = document.getElementById('correlationSection');
@@ -1274,50 +1328,8 @@ function renderCorrelationSummary(finalRows, threshold, outCol) {
   const nSuccess    = finalRows.filter(successTest).length;
   const basePct     = (nSuccess / finalRows.length * 100).toFixed(1);
 
-  // ── Compute stats for every factor ──────────────────────────────
-  _corrData = [];
-  FACTOR_GROUPS.forEach(group => {
-    group.factors.forEach(factor => {
-      const brackets = factor.fn(finalRows).filter(b => b.rows.length >= 1);
-      if (brackets.length < 2) return;
-
-      const cv    = chiSquareAndV(brackets, successTest);
-      const ivRes = infoValue(brackets, successTest);
-      const η2    = etaSquared(brackets);
-      const rho   = factor.getValue ? spearmanRho(finalRows, factor.getValue) : null;
-
-      // Success rate per bracket (for bracket detail table)
-      const bracketStats = ivRes.detail.map(d => {
-        const rate = d.n ? d.s / d.n : null;
-        return { ...d, rate };
-      });
-
-      // Verdict based on Cramér's V primary, IV secondary
-      const verdict = cv.V >= 0.40                        ? 'strong'
-                    : cv.V >= 0.20 || ivRes.iv >= 0.10    ? 'moderate'
-                    : cv.V >= 0.10 || ivRes.iv >= 0.02    ? 'weak'
-                    : 'noise';
-
-      _corrData.push({
-        group: group.title,
-        factor: factor.label,
-        id: factor.id,
-        V: cv.V,
-        chi2: cv.chi2,
-        df: cv.df,
-        p: cv.p,
-        iv: ivRes.iv,
-        eta2: η2,
-        rho,
-        verdict,
-        bracketStats,
-        basePct: nSuccess / finalRows.length,
-      });
-    });
-  });
-
-  // Sort by Cramér's V descending (strongest signal first)
-  _corrData.sort((a, b) => b.V - a.V);
+  // Displayed table uses the noise-cut rows the user selected.
+  _corrData = computeCorrData(finalRows, threshold);
 
   // ── Build HTML ───────────────────────────────────────────────────
   let html = `
@@ -1602,7 +1614,7 @@ function renderShortlistQuality(allRows, outCol, threshold) {
 // SCORING MODEL — save analysis results for live card scoring
 // ══════════════════════════════════════════════════════════════════
 function saveScoringModel() {
-  if (!_corrData.length) {
+  if (!_modelCorrData.length) {
     document.getElementById('saveModelStatus').textContent = '⚠ Run analysis first.';
     return;
   }
@@ -1615,7 +1627,7 @@ function saveScoringModel() {
   const outColEl   = document.getElementById('colStripText');
   const outColText = outColEl ? outColEl.textContent : '';
 
-  const factors = _corrData
+  const factors = _modelCorrData
     .filter(d => allowed.includes(d.verdict))
     .map(d => ({
       id:      d.id,
@@ -1639,7 +1651,7 @@ function saveScoringModel() {
     mode:          selectedMode,
     threshold,
     outCol:        outColText,
-    nRows:         _finalRows.length,
+    nRows:         _modelRows.length,
     verdictFilter: filter,
     factors
   };
@@ -1835,14 +1847,14 @@ document.getElementById('successThreshold').addEventListener('input', saveAnalys
 
 // Auto-save scoring model silently after each analysis run
 function autoSaveScoringModel() {
-  if (!_corrData.length) return;
+  if (!_modelCorrData.length) return;
   const vf      = document.getElementById('modelVerdictFilter');
   const filter  = vf ? vf.value : 'strong+moderate';
   const allowed = filter === 'strong'          ? ['strong']
                 : filter === 'strong+moderate' ? ['strong','moderate']
                 : ['strong','moderate','weak'];
   const threshold = parseFloat(document.getElementById('successThreshold').value) || 1.3;
-  const factors = _corrData
+  const factors = _modelCorrData
     .filter(d => allowed.includes(d.verdict))
     .map(d => ({
       id: d.id, label: d.factor,
@@ -1856,7 +1868,7 @@ function autoSaveScoringModel() {
   const model = {
     savedAt: new Date().toISOString(),
     slot: selectedSlot, mode: selectedMode, threshold,
-    nRows: _finalRows.length, verdictFilter: filter, factors
+    nRows: _modelRows.length, verdictFilter: filter, factors
   };
   fetch('/api/scoring-model', {
     method: 'POST',

@@ -734,7 +734,11 @@ async function freezeScreener(slot) {
           longTerm: (snap.longTerm && snap.longTerm.result) || 'UNKNOWN',
           longTermLabel: (snap.longTerm && snap.longTerm.label) || '',
           midTerm: (snap.midTerm && snap.midTerm.result) || 'UNKNOWN',
-          midTermLabel: (snap.midTerm && snap.midTerm.stageLabel) || ''
+          midTermLabel: (snap.midTerm && snap.midTerm.stageLabel) || '',
+          // Include regime so the server-stamped score_at_entry uses the same
+          // factor set the browser does. scoreCard reads context.regime.slug; the
+          // snapshot's regime is the same object analysis trains on (snap*_regime).
+          regime: snap.regime || null
         };
       });
     }
@@ -804,18 +808,18 @@ async function autoUpdateModel() {
   const regimes = settings.regimes && settings.regimes.length ? new Set(settings.regimes) : null;
   const regimePassed = regimes ? validRows.filter(r => regimes.has(r._regime)) : validRows;
 
-  const noisePct = settings.noisePct || 30;
-  const sorted   = [...regimePassed].sort((a, b) => a._output - b._output);
-  const n        = sorted.length;
-  const cut      = Math.round(n * noisePct / 100);
-  const finalRows = n > 0 ? sorted.filter((_, i) => i < cut || i >= n - cut) : [];
+  // Train the scoring model on the FULL population it will later score. The
+  // top/bottom noise cut is a display-only aid in the Analysis tab; applying it
+  // here would calibrate WoE to a censored extremes-only sample that the live
+  // cards (drawn from the whole distribution) never match.
+  const modelRows = regimePassed;
 
-  if (finalRows.length < 6) {
-    console.log('[auto-model] Not enough rows after noise cut:', finalRows.length);
+  if (modelRows.length < 6) {
+    console.log('[auto-model] Not enough rows to build model:', modelRows.length);
     return;
   }
 
-  const corrData = computeCorrelation(finalRows, settings.threshold || 1.3);
+  const corrData = computeCorrelation(modelRows, settings.threshold || 1.3);
   const model    = buildScoringModel(corrData, settings);
   if (!model || !model.factors.length) {
     console.log('[auto-model] No factors passed verdict filter:', settings.verdictFilter);
@@ -823,7 +827,7 @@ async function autoUpdateModel() {
   }
 
   setSetting('scoring_model', JSON.stringify(model));
-  console.log(`[auto-model] Updated: ${model.factors.length} factors (${model.verdictFilter}) from ${finalRows.length} rows`);
+  console.log(`[auto-model] Updated: ${model.factors.length} factors (${model.verdictFilter}) from ${modelRows.length} rows`);
 }
 
 // ══════════════════════════════════════════════════════════════════

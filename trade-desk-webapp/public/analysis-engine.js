@@ -107,7 +107,7 @@ const FACTOR_GROUPS = [
           {label:'$50+',    test:v=>v>=50},
         ])},
       { id:'change_pct', label:'Change % (day)', getValue: r => pf(r,'change_pct'), fn: numBrackets(r => pf(r,'change_pct'), [
-          {label:'<10%',     test:v=>v<10},
+          {label:'<10%',     test:v=>v>=0&&v<10},
           {label:'10–25%',   test:v=>v>=10&&v<25},
           {label:'25–50%',   test:v=>v>=25&&v<50},
           {label:'50–100%',  test:v=>v>=50&&v<100},
@@ -299,18 +299,31 @@ function chiSquareAndV(brackets, successTest) {
   return { chi2, V, p, df };
 }
 
+// WoE statistics constants. A bracket's WoE must scale with how much evidence
+// backs it — otherwise a 2-row bracket shouts as loudly as a 200-row one.
+//   WOE_SMOOTH — Laplace/Haldane add-one(-half) smoothing. Adding a constant to
+//     every cell before the ratio means an empty cell can never produce log(0).
+//     This replaces the old `|| 1e-9` fallback that yielded WoE ≈ ±20 and forced
+//     a downstream ±2 clamp that only hid the symptom.
+//   WOE_CRED_K — credibility weight. Each bracket's WoE is shrunk toward 0
+//     (neutral) by n/(n+K), so a bracket is ~half-trusted once it holds K rows.
+const WOE_SMOOTH = 0.5;
+const WOE_CRED_K = 20;
+
 function infoValue(brackets, successTest) {
   const totalS = brackets.reduce((s, b) => s + b.rows.filter(successTest).length, 0);
   const totalF = brackets.reduce((s, b) => s + b.rows.filter(r => !successTest(r)).length, 0);
   if (!totalS || !totalF) return { iv: 0, detail: [] };
 
+  const k = brackets.length;
   let iv = 0;
   const detail = brackets.map(b => {
     const s  = b.rows.filter(successTest).length;
     const f  = b.rows.length - s;
-    const ds = (s / totalS) || 1e-9;
-    const df = (f / totalF) || 1e-9;
-    const woe    = Math.log(ds / df);
+    const ds = (s + WOE_SMOOTH) / (totalS + WOE_SMOOTH * k);  // smoothed success share
+    const df = (f + WOE_SMOOTH) / (totalF + WOE_SMOOTH * k);  // smoothed failure share
+    const cred = b.rows.length / (b.rows.length + WOE_CRED_K); // sample-size credibility
+    const woe    = Math.log(ds / df) * cred;
     const contrib = (ds - df) * woe;
     iv += contrib;
     return { label: b.label, n: b.rows.length, s, f, ds, df, woe, contrib };
