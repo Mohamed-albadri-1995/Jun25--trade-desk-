@@ -55,7 +55,7 @@ var SCORE_FACTORS = [
   // ── Screener & Sector ────────────────────────────────────────────────
   {
     id: 'screeners',
-    getValue: function(row) { return (row.screenerKeys || []).join(' / ') || null; },
+    getValue: function(row) { return (row.screenerKeys || []).slice().sort().join(' + ') || null; },
     matchBracket: function(val, brackets) {
       return brackets.find(function(b) { return b.label === val; }) || null;
     }
@@ -180,14 +180,18 @@ var SCORE_FACTORS = [
     id: 'ema_stack',
     getValue: function(row) {
       var s = row.stock;
-      if (!s || s.price == null) return null;
-      var above50 = s.ema50 != null && s.price > s.ema50;
-      var e9ok  = s.ema9  != null && s.ema9  > s.ema13;
-      var e13ok = s.ema13 != null && s.ema13 > s.ema20;
-      if (e9ok && e13ok && above50) return '9>13>20, above 50';
-      if (e9ok && e13ok)            return '9>13>20, below 50';
-      if (above50)                  return 'Above 50 only';
-      return 'Mixed / bearish stack';
+      if (!s || s.ema9 == null || s.ema13 == null || s.ema20 == null || s.ema50 == null) return null;
+      var a = s.ema9  > s.ema13;
+      var b = s.ema13 > s.ema20;
+      var c = s.ema20 > s.ema50;
+      if ( a &&  b &&  c) return '9>13>20>50 (full bull)';
+      if ( a &&  b && !c) return '9>13>20, below 50';
+      if (!a &&  b &&  c) return '13>20>50, 9 lagging';
+      if (!a &&  b && !c) return '13>20 only';
+      if ( a && !b &&  c) return '9>13, 13<20, above 50';
+      if ( a && !b && !c) return '9>13 only';
+      if (!a && !b &&  c) return 'Below cloud, above 50';
+      return '9<13<20<50 (full bear)';
     },
     matchBracket: function(val, brackets) {
       return brackets.find(function(b){return b.label === val;}) || null;

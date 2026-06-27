@@ -757,16 +757,19 @@ function catBrackets(get) {
   };
 }
 
-// EMA relationship
+// EMA relationship — all 8 ordered combos of (9>13, 13>20, 20>50)
 function emaStack(row) {
   const e9=pf(row,'ema9'), e13=pf(row,'ema13'), e20=pf(row,'ema20'), e50=pf(row,'ema50');
   if (!isFinite(e9)||!isFinite(e13)||!isFinite(e20)||!isFinite(e50)) return 'N/A';
-  const a9gt13=e9>e13, a13gt20=e13>e20, a20gt50=e20>e50;
-  if (a9gt13 && a13gt20 && a20gt50) return '9>13>20>50 (full bull)';
-  if (a9gt13 && a13gt20 && !a20gt50) return '9>13>20 below 50';
-  if (!a9gt13 && !a13gt20 && !a20gt50) return '9<13<20<50 (full bear)';
-  if (!a9gt13 && !a13gt20 && a20gt50) return '9<13<20 above 50';
-  return 'Mixed';
+  const a=e9>e13, b=e13>e20, c=e20>e50;
+  if ( a &&  b &&  c) return '9>13>20>50 (full bull)';
+  if ( a &&  b && !c) return '9>13>20, below 50';
+  if (!a &&  b &&  c) return '13>20>50, 9 lagging';
+  if (!a &&  b && !c) return '13>20 only';
+  if ( a && !b &&  c) return '9>13, 13<20, above 50';
+  if ( a && !b && !c) return '9>13 only';
+  if (!a && !b &&  c) return 'Below cloud, above 50';
+  return '9<13<20<50 (full bear)';
 }
 function priceVsEMA(row, ema) {
   const p=pf(row,'price'), e=pf(row,ema);
@@ -802,7 +805,7 @@ const FACTOR_GROUPS = [
   {
     title: '🏷 Screener & Sector',
     factors: [
-      { id:'screeners', label:'Screener(s) matched', fn: catBrackets(r => r.screeners) },
+      { id:'screeners', label:'Screener(s) matched', fn: catBrackets(r => r.screeners ? r.screeners.split('|').sort().join(' + ') : null) },
       { id:'sector',    label:'Sector',              fn: catBrackets(r => r.sector) },
       { id:'industry',  label:'Industry',            fn: catBrackets(r => r.industry) },
       { id:'sec_bias',  label:'Sector bias (capture)', fn: catBrackets(r => r.sec_bias) },
