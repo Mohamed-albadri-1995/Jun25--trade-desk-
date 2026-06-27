@@ -6,6 +6,7 @@ const cron    = require('node-cron');
 const path    = require('path');
 const Database = require('better-sqlite3');
 const { scoreCard } = require('./public/scoring-brackets');
+const { makeWorkingRow, computeCorrelation, buildScoringModel } = require('./public/analysis-engine');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'trade-desk.db');
@@ -781,6 +782,51 @@ async function freezeScreener(slot) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// AUTO MODEL UPDATE — runs after EOD data arrives each day
+// ══════════════════════════════════════════════════════════════════
+async function autoUpdateModel() {
+  let settings;
+  try { settings = JSON.parse(getSetting('analysis_settings', '{}')); } catch { settings = {}; }
+  if (!settings.slot) {
+    console.log('[auto-model] No saved analysis settings — skipping');
+    return;
+  }
+
+  const rows = buildMergedRows();
+  if (!rows.length) { console.log('[auto-model] No merged register rows'); return; }
+
+  const suffix  = settings.slot === '09:35' ? '35'      : '40';
+  const snapPfx = settings.slot === '09:35' ? 'snap935' : 'snap940';
+  const mode    = settings.mode || 'up';
+
+  const validRows = rows.map(r => makeWorkingRow(r, suffix, snapPfx, mode)).filter(Boolean);
+
+  const regimes = settings.regimes && settings.regimes.length ? new Set(settings.regimes) : null;
+  const regimePassed = regimes ? validRows.filter(r => regimes.has(r._regime)) : validRows;
+
+  const noisePct = settings.noisePct || 30;
+  const sorted   = [...regimePassed].sort((a, b) => a._output - b._output);
+  const n        = sorted.length;
+  const cut      = Math.round(n * noisePct / 100);
+  const finalRows = n > 0 ? sorted.filter((_, i) => i < cut || i >= n - cut) : [];
+
+  if (finalRows.length < 6) {
+    console.log('[auto-model] Not enough rows after noise cut:', finalRows.length);
+    return;
+  }
+
+  const corrData = computeCorrelation(finalRows, settings.threshold || 1.3);
+  const model    = buildScoringModel(corrData, settings);
+  if (!model || !model.factors.length) {
+    console.log('[auto-model] No factors passed verdict filter:', settings.verdictFilter);
+    return;
+  }
+
+  setSetting('scoring_model', JSON.stringify(model));
+  console.log(`[auto-model] Updated: ${model.factors.length} factors (${model.verdictFilter}) from ${finalRows.length} rows`);
+}
+
+// ══════════════════════════════════════════════════════════════════
 // CRON JOBS
 // ══════════════════════════════════════════════════════════════════
 function startCronJobs() {
@@ -807,7 +853,11 @@ function startCronJobs() {
     if (autoMode !== 'auto') return;
     const date = etDateStr();
     console.log('[EOD] Auto-running R3 for', date);
-    try { await runEodOutcome(date); console.log('[EOD] Complete for', date); }
+    try {
+      await runEodOutcome(date);
+      console.log('[EOD] Complete for', date);
+      await autoUpdateModel();
+    }
     catch (err) { console.error('[EOD] Failed:', err.message); }
   }, { timezone: TZ });
 
@@ -867,8 +917,8 @@ app.get('/factor-analysis.html', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'factor-analysis.html'));
 });
 
-// Merged register — same join as exportMergedRegisterCsv() in app.js, returned as JSON rows
-app.get('/api/merged-register', (req, res) => {
+// ── Merged register builder (shared by API endpoint and autoUpdateModel) ──────
+function buildMergedRows() {
   const allR1 = getAllFrozenScreener();
   const allR3 = getAllEodOutcome();
   const allR2 = getAllMarketSnapshots();
@@ -938,7 +988,27 @@ app.get('/api/merged-register', (req, res) => {
       });
     });
   });
+  return rows;
+}
+
+// Merged register — returned as JSON rows
+app.get('/api/merged-register', (req, res) => {
+  const rows = buildMergedRows();
   res.json({ ok: true, count: rows.length, rows });
+});
+
+// Analysis settings — persists user's last filter choices for auto-model pipeline
+app.get('/api/analysis-settings', (req, res) => {
+  try { res.json(JSON.parse(getSetting('analysis_settings', '{}'))); }
+  catch { res.json({}); }
+});
+app.post('/api/analysis-settings', (req, res) => {
+  setSetting('analysis_settings', JSON.stringify(req.body || {}));
+  res.json({ ok: true });
+});
+app.post('/api/auto-model', async (req, res) => {
+  try { await autoUpdateModel(); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // Status

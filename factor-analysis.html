@@ -431,6 +431,7 @@ function loadData(input) {
     document.getElementById('runBtn').disabled = false;
 
     buildRegimeChecks();
+    applyRestoredRegimes();
     runAnalysis();
   } catch(e) {
     showErr('Failed to parse CSV: ' + e.message);
@@ -609,6 +610,22 @@ function runAnalysis() {
   const threshold = Math.max(0.1, parseFloat(document.getElementById('successThreshold').value) || 1.3);
   renderCorrelationSummary(finalRows, threshold, outCol);
   renderShortlistQuality(allRows, outCol, threshold);
+
+  // Apply saved verdict filter (element rendered inside renderCorrelationSummary)
+  const vf = document.getElementById('modelVerdictFilter');
+  if (vf) {
+    if (window._savedVerdictFilter) {
+      vf.value = window._savedVerdictFilter;
+      window._savedVerdictFilter = null;
+    }
+    if (!vf._settingsWired) {
+      vf.addEventListener('change', saveAnalysisSettings);
+      vf._settingsWired = true;
+    }
+  }
+
+  // Auto-save scoring model after each run
+  autoSaveScoringModel();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1748,10 +1765,128 @@ function _scheduleAutoRefresh() {
   _autoRefreshTimer = setInterval(function() { loadFromServer(true); }, 5 * 60 * 1000);
 }
 
-// Auto-load on page open (silent = no error banner if server is unreachable at startup)
+// ══════════════════════════════════════════════════════════════════
+// SETTINGS PERSISTENCE
+// ══════════════════════════════════════════════════════════════════
+let _settingsSaveTimer = null;
+
+function _getSettings() {
+  return {
+    slot:          selectedSlot,
+    mode:          selectedMode,
+    noisePct:      parseInt(document.getElementById('noisePct').value) || 30,
+    threshold:     parseFloat(document.getElementById('successThreshold').value) || 1.3,
+    regimes:       [...selectedRegimes],
+    verdictFilter: (document.getElementById('modelVerdictFilter') || {}).value || 'strong+moderate'
+  };
+}
+
+function saveAnalysisSettings() {
+  clearTimeout(_settingsSaveTimer);
+  _settingsSaveTimer = setTimeout(function() {
+    fetch('/api/analysis-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(_getSettings())
+    }).catch(function() {});
+  }, 300);
+}
+
+function restoreAnalysisSettings(s) {
+  if (!s || !s.slot) return;
+  if (s.slot) {
+    document.querySelectorAll('[data-slot]').forEach(b => {
+      b.classList.toggle('on', b.dataset.slot === s.slot);
+    });
+    selectedSlot = s.slot;
+  }
+  if (s.mode) {
+    document.querySelectorAll('[data-mode]').forEach(b => {
+      b.classList.toggle('on', b.dataset.mode === s.mode);
+    });
+    selectedMode = s.mode;
+  }
+  if (s.noisePct) {
+    document.getElementById('noisePct').value = s.noisePct;
+    document.getElementById('noiseMiddle').textContent = 100 - s.noisePct * 2;
+  }
+  if (s.threshold) document.getElementById('successThreshold').value = s.threshold;
+  if (s.regimes && s.regimes.length) window._savedRegimes = new Set(s.regimes);
+  if (s.verdictFilter) window._savedVerdictFilter = s.verdictFilter;
+}
+
+function applyRestoredRegimes() {
+  if (!window._savedRegimes) return;
+  selectedRegimes = new Set();
+  document.querySelectorAll('#regimeChecks input[type=checkbox]').forEach(inp => {
+    const on = window._savedRegimes.has(inp.value);
+    inp.checked = on;
+    if (on) selectedRegimes.add(inp.value);
+    inp.closest('label').classList.toggle('on', on);
+  });
+  window._savedRegimes = null;
+}
+
+// Wire all controls to persist settings on change
+document.querySelectorAll('[data-slot]').forEach(btn => btn.addEventListener('click', saveAnalysisSettings));
+document.querySelectorAll('[data-mode]').forEach(btn => btn.addEventListener('click', saveAnalysisSettings));
+document.getElementById('noisePct').addEventListener('input', saveAnalysisSettings);
+document.getElementById('successThreshold').addEventListener('input', saveAnalysisSettings);
+
+// Auto-save scoring model silently after each analysis run
+function autoSaveScoringModel() {
+  if (!_corrData.length) return;
+  const vf      = document.getElementById('modelVerdictFilter');
+  const filter  = vf ? vf.value : 'strong+moderate';
+  const allowed = filter === 'strong'          ? ['strong']
+                : filter === 'strong+moderate' ? ['strong','moderate']
+                : ['strong','moderate','weak'];
+  const threshold = parseFloat(document.getElementById('successThreshold').value) || 1.3;
+  const factors = _corrData
+    .filter(d => allowed.includes(d.verdict))
+    .map(d => ({
+      id: d.id, label: d.factor,
+      V: Math.round(d.V * 10000) / 10000,
+      verdict: d.verdict,
+      brackets: (d.bracketStats || []).map(b => ({
+        label: b.label, woe: Math.round((b.woe || 0) * 10000) / 10000
+      }))
+    }));
+  if (!factors.length) return;
+  const model = {
+    savedAt: new Date().toISOString(),
+    slot: selectedSlot, mode: selectedMode, threshold,
+    nRows: _finalRows.length, verdictFilter: filter, factors
+  };
+  fetch('/api/scoring-model', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(model)
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        _updateAutoStatus((_autoStatus()) + ' · Model auto-saved (' + factors.length + ' factors)');
+        window.parent.postMessage({ type: 'SCORING_MODEL_UPDATED' }, '*');
+      }
+    })
+    .catch(function() {});
+}
+function _autoStatus() {
+  const el = document.getElementById('autoStatus');
+  return el ? el.textContent : '';
+}
+
+// Auto-load on page open — restore settings first, then load data
 document.addEventListener('DOMContentLoaded', function() {
-  loadFromServer(true);
-  _scheduleAutoRefresh();
+  fetch('/api/analysis-settings')
+    .then(function(r) { return r.json(); })
+    .then(function(s) { restoreAnalysisSettings(s); })
+    .catch(function() {})
+    .finally(function() {
+      loadFromServer(true);
+      _scheduleAutoRefresh();
+    });
 });
 
 // ══════════════════════════════════════════════════════════════════
