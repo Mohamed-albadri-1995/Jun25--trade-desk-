@@ -602,7 +602,7 @@ function runAnalysis() {
   // ── Statistical correlation summary ──────────────────────────────
   const threshold = Math.max(0.1, parseFloat(document.getElementById('successThreshold').value) || 1.3);
   renderCorrelationSummary(finalRows, threshold, outCol);
-  renderShortlistQuality(_csvRows, outCol, threshold);
+  renderShortlistQuality(allRows, outCol, threshold);
 }
 
 // ══════════════════════════════════════════════════════════════════
