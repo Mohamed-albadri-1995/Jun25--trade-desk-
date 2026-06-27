@@ -2900,6 +2900,12 @@ function registryRefreshContext() {
 // that fills #scrResults). Live candidates first, then by screeners matched,
 // then RVOL, then most-recently updated.
 var _scoringModel = null;
+
+window.addEventListener('message', function (e) {
+  if (e.data && e.data.type === 'SCORING_MODEL_UPDATED') {
+    _loadScoringModel().then(function () { renderScreenerFromRegistry(); });
+  }
+});
 function _loadScoringModel() {
   return storageGet(['scoring_model']).then(function(r) {
     _scoringModel = r.scoring_model || null;

@@ -1486,9 +1486,12 @@ function saveScoringModel() {
   })
     .then(r => r.json())
     .then(d => {
-      status.textContent = d.ok
-        ? '✅ Saved — ' + factors.length + ' factors (' + filter + ')'
-        : '⚠ ' + (d.error || 'save failed');
+      if (d.ok) {
+        status.textContent = '✅ Saved — ' + factors.length + ' factors (' + filter + ')';
+        window.parent.postMessage({ type: 'SCORING_MODEL_UPDATED' }, '*');
+      } else {
+        status.textContent = '⚠ ' + (d.error || 'save failed');
+      }
     })
     .catch(e => { status.textContent = '⚠ ' + e.message; })
     .finally(() => { btn.disabled = false; });
