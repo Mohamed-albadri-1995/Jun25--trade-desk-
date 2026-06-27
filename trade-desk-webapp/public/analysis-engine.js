@@ -430,7 +430,7 @@ function buildScoringModel(corrData, settings) {
       verdict: d.verdict,
       brackets: (d.bracketStats || []).map(b => ({
         label: b.label,
-        woe:   Math.round((b.woe || 0) * 10000) / 10000
+        woe:   Math.round(Math.max(-2, Math.min(2, b.woe || 0)) * 10000) / 10000
       }))
     }));
 
