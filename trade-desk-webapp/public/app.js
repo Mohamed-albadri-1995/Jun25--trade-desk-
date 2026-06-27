@@ -55,7 +55,10 @@ var DEFAULT_SETTINGS = {
   finnhubKey: '',
   finnhubNews: true,
   snapshotMode: 'manual',  // 'manual' | 'auto'
-  journalCsvTz: 3          // hours ahead of UTC for journal CSV imports; 3 = UTC+3 (Saudi Arabia)
+  journalCsvTz: 3,         // hours ahead of UTC for journal CSV imports; 3 = UTC+3 (Saudi Arabia)
+  autoShortlistEnabled: false, // build today's shortlist server-side after the 09:35 freeze
+  autoShortlistMinScore: 70,   // keep only stocks scoring >= this %
+  autoShortlistMaxCount: 5     // then the top N of those by score
 };
 var settings = Object.assign({}, DEFAULT_SETTINGS);
 
@@ -3743,6 +3746,9 @@ function fillSettingsForm() {
   $('setFinnhub').value = settings.finnhubKey || '';
   $('setFinnhubNews').checked = settings.finnhubNews !== false;
   $('setSnapMode').value = settings.snapshotMode || 'manual';
+  $('setAutoSL').value = settings.autoShortlistEnabled ? 'on' : 'off';
+  $('setAutoSLMin').value = settings.autoShortlistMinScore != null ? settings.autoShortlistMinScore : 70;
+  $('setAutoSLMax').value = settings.autoShortlistMaxCount != null ? settings.autoShortlistMaxCount : 5;
 }
 function setSettingsStatus(msg) {
   $('setStatus').textContent = msg;
@@ -3767,6 +3773,9 @@ function initSettings() {
     settings.finnhubKey = ($('setFinnhub').value || '').trim();
     settings.finnhubNews = !!$('setFinnhubNews').checked;
     settings.snapshotMode = $('setSnapMode').value === 'auto' ? 'auto' : 'manual';
+    settings.autoShortlistEnabled = $('setAutoSL').value === 'on';
+    settings.autoShortlistMinScore = clampInt($('setAutoSLMin').value, 0, 100, DEFAULT_SETTINGS.autoShortlistMinScore);
+    settings.autoShortlistMaxCount = clampInt($('setAutoSLMax').value, 1, 50, DEFAULT_SETTINGS.autoShortlistMaxCount);
     // keep thresholds ordered: floor ≤ sustained ≤ immediate
     if (settings.hotSustained > settings.hotImmediate) settings.hotSustained = settings.hotImmediate;
     if (settings.hotFloor > settings.hotSustained) settings.hotFloor = settings.hotSustained;

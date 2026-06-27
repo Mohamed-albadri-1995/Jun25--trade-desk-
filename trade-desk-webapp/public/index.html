@@ -853,6 +853,28 @@
 
     <div class="section">
       <details>
+        <summary class="section-hdr" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">⭐ Auto Shortlist <span style="font-size:10px;color:var(--muted)">▸</span></summary>
+        <div class="set-help">Builds today's shortlist automatically right after the <b>09:35 ET screener freeze</b> — server-side, so it runs every weekday whether or not the app is open. It keeps only stocks scoring at or above the minimum, then the top N of those by score (fewer if not enough qualify). Manually-starred picks are kept. It's a one-time choice: once <b>On</b>, it runs every day until you switch it <b>Off</b>. Press <b>Save settings</b> to apply.</div>
+        <div class="set-field">
+          <label>Auto shortlist</label>
+          <select id="setAutoSL">
+            <option value="off">Off — I pick manually</option>
+            <option value="on">On — pick automatically at 09:35 ET</option>
+          </select>
+        </div>
+        <div class="set-field">
+          <label>Minimum score (%)</label>
+          <input type="number" id="setAutoSLMin" min="0" max="100" step="1">
+        </div>
+        <div class="set-field">
+          <label>Max stocks</label>
+          <input type="number" id="setAutoSLMax" min="1" max="50" step="1">
+        </div>
+      </details>
+    </div>
+
+    <div class="section">
+      <details>
         <summary class="section-hdr" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">💾 Data Backup <span style="font-size:10px;color:var(--muted)">▸</span></summary>
         <div class="set-help">Download a full JSON snapshot of all registers (R1 Screener, R2 Snapshots, R3 EOD, R0 Registry, Journal) for safekeeping. The server also auto-exports to <code>backups/YYYY-MM-DD/</code> at 16:30 ET daily.</div>
         <div class="row">

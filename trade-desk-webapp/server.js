@@ -929,6 +929,54 @@ async function fetchCatalystsForTickers(tickers, budgetMs) {
   return out;
 }
 
+// ── Auto shortlist ─────────────────────────────────────────────────────────
+// Runs server-side right after the freeze stamps scores, so the day's shortlist
+// is built automatically every weekday whether or not the app is open. Gated by
+// a persisted setting (autoShortlistEnabled), so it's a one-time choice that
+// keeps running until disabled. Picks today's registry rows scoring >= a minimum
+// (autoShortlistMinScore, default 70) then the top N of those by score
+// (autoShortlistMaxCount, default 5). Manually-starred items are preserved;
+// prior auto picks are replaced so re-running the same day is idempotent.
+function buildAutoShortlist(date) {
+  try {
+    if (getSetting('autoShortlistEnabled', 'false') !== 'true') return;
+    const minRaw = parseFloat(getSetting('autoShortlistMinScore', '70'));
+    const capRaw = parseInt(getSetting('autoShortlistMaxCount', '5'), 10);
+    const min = isFinite(minRaw) ? minRaw : 70;
+    const cap = (isFinite(capRaw) && capRaw > 0) ? capRaw : 5;
+
+    const reg = getRegistry();
+    const qualified = Object.keys(reg).map(k => reg[k])
+      .filter(r => r && r.date === date && r.score_at_entry != null &&
+                   isFinite(+r.score_at_entry) && +r.score_at_entry >= min)
+      .sort((a, b) => (+b.score_at_entry) - (+a.score_at_entry))
+      .slice(0, cap);
+
+    let all; try { all = JSON.parse(getSetting('shortlists', '{}')) || {}; } catch (_) { all = {}; }
+    const day = all[date] || { items: [], exports: [] };
+    const manual = (day.items || []).filter(it => !it.auto);          // keep user-starred picks
+    const manualTickers = new Set(manual.map(it => it.ticker));
+    const autoItems = qualified
+      .filter(r => !manualTickers.has(r.ticker))                       // don't duplicate a manual pick
+      .map(r => {
+        const s = r.stock || {};
+        return {
+          ticker: r.ticker, tvSymbol: s.tvSymbol || '',
+          price: s.price != null ? s.price : null,
+          change: s.change != null ? s.change : null,
+          sector: s.sector || '', addedAt: Date.now(),
+          auto: true, score: +r.score_at_entry
+        };
+      });
+    day.items = manual.concat(autoItems);
+    all[date] = day;
+    setSetting('shortlists', JSON.stringify(all));
+    console.log(`[${etTimeStr()}] auto-shortlist ${date}: ${autoItems.length} picked (score >= ${min}, top ${cap})`);
+  } catch (e) {
+    console.error(`[${etTimeStr()}] auto-shortlist failed: ${e.message}`);
+  }
+}
+
 async function freezeScreener(slot) {
   const date = etDateStr();
   const existing = getFrozenScreener(date);
@@ -1030,6 +1078,10 @@ async function freezeScreener(slot) {
       upsertRegistryRow(ticker, date, regRow);
     });
     console.log(`[${etTimeStr()}] Registry updated: ${Object.keys(rows).length} rows, ${scored} newly scored`);
+
+    // Auto-build today's shortlist from the freshly-stamped scores (no-op unless
+    // enabled in settings). Runs server-side so it works with the app closed.
+    buildAutoShortlist(date);
   } catch (err) {
     console.error(`[${etTimeStr()}] R1 freeze failed: ${err.message}`);
   }
