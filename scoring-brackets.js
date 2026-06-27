@@ -406,8 +406,12 @@ function scoreCard(row, model) {
     totalWeight  += mf.V;
   });
   if (totalWeight === 0) return null;
-  var raw = weightedWoE / totalWeight;         // typically −2 to +2
-  var score = Math.round((raw + 2) / 4 * 100); // normalise to 0–100
+  var raw = weightedWoE / totalWeight;
+  // Clamp to [-2, +2] before normalising — old models may have uncapped WoE
+  // values (±20) from the 1e-9 fallback in infoValue(); without this clamp
+  // any card hitting a single "0 successes" bracket scores exactly 0.
+  var capped = Math.max(-2, Math.min(2, raw));
+  var score = Math.round((capped + 2) / 4 * 100); // maps [-2,+2] → [0,100]
   return Math.max(0, Math.min(100, score));
 }
 
