@@ -818,6 +818,12 @@ function startCronJobs() {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
+// No-cache for files that change on every deploy (app.js, chrome-shim.js)
+app.use(['/app.js', '/chrome-shim.js'], (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Status
