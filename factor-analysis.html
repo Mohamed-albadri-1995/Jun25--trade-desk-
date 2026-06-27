@@ -225,11 +225,11 @@ table.btbl td:first-child{text-align:left;color:var(--txt2)}
 <div id="uploadZone" class="upload-zone">
   <div style="font-size:28px">📂</div>
   <strong>Load merged register data</strong>
-  <p style="margin-bottom:12px">Load directly from the server, or drop / browse a CSV file.</p>
+  <p style="margin-bottom:12px">Data auto-loads from the server on open. You can also drop / browse a CSV file to override.</p>
   <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap" onclick="event.stopPropagation()">
-    <button id="serverLoadBtn" onclick="loadFromServer()"
+    <button id="serverLoadBtn" onclick="loadFromServer(false)"
       style="padding:9px 18px;border-radius:7px;border:1px solid rgba(94,234,212,.4);background:rgba(94,234,212,.08);color:var(--teal);font-size:12px;font-weight:700;cursor:pointer">
-      ⚡ Load from Server
+      ⚡ Refresh from Server
     </button>
     <button onclick="document.getElementById('fileInput').click()"
       style="padding:9px 18px;border-radius:7px;border:1px solid var(--border2);background:var(--inset);color:var(--txt2);font-size:12px;font-weight:700;cursor:pointer">
@@ -339,8 +339,9 @@ table.btbl td:first-child{text-align:left;color:var(--txt2)}
   <div class="preview-body" id="previewBody"></div>
 </div>
 
+<div id="autoStatus" style="font-size:11px;color:#64748b;padding:4px 20px;background:#080f1c;border-bottom:1px solid #1e293b;min-height:22px"></div>
 <div id="errBar"></div>
-<div id="content"><div class="empty-msg">Load a merged register CSV to begin analysis.</div></div>
+<div id="content"><div class="empty-msg">Loading data from server…</div></div>
 <div id="correlationSection" style="display:none;padding:0 20px 60px"></div>
 <div id="shortlistSection" style="display:none;padding:0 20px 60px"></div>
 
@@ -413,9 +414,14 @@ function readFile(file) {
   reader.readAsText(file);
 }
 
-function loadData(text) {
+function loadData(input) {
   try {
-    allRows = parseCSV(text);
+    // Accept either a JSON array (from server) or a CSV string (from file upload)
+    if (Array.isArray(input)) {
+      allRows = input;
+    } else {
+      allRows = parseCSV(input);
+    }
     if (!allRows.length) { showErr('CSV appears empty.'); return; }
     clearErr();
 
@@ -424,7 +430,7 @@ function loadData(text) {
     document.getElementById('summaryBar').style.display = 'flex';
     document.getElementById('runBtn').disabled = false;
 
-    buildRegimeChecks(); // builds from currently selected slot
+    buildRegimeChecks();
     runAnalysis();
   } catch(e) {
     showErr('Failed to parse CSV: ' + e.message);
@@ -1694,30 +1700,59 @@ function csvCell(v) {
 
 // ══════════════════════════════════════════════════════════════════
 // SERVER DIRECT LOAD  (/api/merged-register)
-// Works when factor-analysis.html is served by the Trade Desk webapp.
+// Auto-loads on page open; polls every 5 minutes for new data.
 // ══════════════════════════════════════════════════════════════════
-function loadFromServer() {
+let _lastServerRowCount = 0;
+let _autoRefreshTimer   = null;
+
+function _updateAutoStatus(msg) {
+  const el = document.getElementById('autoStatus');
+  if (el) el.textContent = msg;
+}
+
+function loadFromServer(silent) {
   const btn = document.getElementById('serverLoadBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Loading…'; }
+  if (!silent && btn) { btn.disabled = true; btn.textContent = '⏳ Loading…'; }
   fetch('/api/merged-register')
     .then(function(res) {
-      if (!res.ok) throw new Error('Server returned ' + res.status);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.json();
     })
     .then(function(data) {
       if (!data.ok || !data.rows || !data.rows.length) {
-        showErr('No data on server yet — run screeners and EOD outcome first.');
+        if (!silent) showErr('No data on server yet — run screeners and EOD outcome first.');
+        _updateAutoStatus('No data yet');
         return;
       }
-      loadData(data.rows);
+      const newCount = data.rows.length;
+      // Only reload if row count changed (new data) or this is the first load
+      if (newCount !== _lastServerRowCount || !allRows.length) {
+        _lastServerRowCount = newCount;
+        loadData(data.rows);
+        _updateAutoStatus('Auto-loaded ' + newCount + ' rows — ' + new Date().toLocaleTimeString());
+      } else {
+        _updateAutoStatus('Up to date (' + newCount + ' rows) — ' + new Date().toLocaleTimeString());
+      }
     })
     .catch(function(err) {
-      showErr('Could not reach server: ' + err.message + ' — try uploading a CSV instead.');
+      if (!silent) showErr('Could not reach server: ' + err.message);
+      _updateAutoStatus('Refresh failed — ' + err.message);
     })
     .finally(function() {
-      if (btn) { btn.disabled = false; btn.textContent = '⚡ Load from Server'; }
+      if (btn) { btn.disabled = false; btn.textContent = '⚡ Refresh from Server'; }
     });
 }
+
+function _scheduleAutoRefresh() {
+  clearInterval(_autoRefreshTimer);
+  _autoRefreshTimer = setInterval(function() { loadFromServer(true); }, 5 * 60 * 1000);
+}
+
+// Auto-load on page open (silent = no error banner if server is unreachable at startup)
+document.addEventListener('DOMContentLoaded', function() {
+  loadFromServer(true);
+  _scheduleAutoRefresh();
+});
 
 // ══════════════════════════════════════════════════════════════════
 // EXTENSION REGISTRY INTEGRATION
