@@ -826,6 +826,11 @@ app.use(['/app.js', '/chrome-shim.js'], (req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Serve factor-analysis.html from repo root (lives alongside popup.html)
+app.get('/factor-analysis.html', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'factor-analysis.html'));
+});
+
 // Status
 app.get('/api/status', (req, res) => {
   res.json({
