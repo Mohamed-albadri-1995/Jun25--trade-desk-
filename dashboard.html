@@ -96,6 +96,48 @@ table.ftbl tr:hover td{background:rgba(148,163,184,.05)}
 .h3{background:rgba(34,197,94,.08)!important}
 .h4{background:rgba(34,197,94,.18)!important}
 
+/* ── data preview table ── */
+.preview-wrap{margin:0 0 0;border-bottom:1px solid var(--border)}
+.preview-toggle{display:flex;align-items:center;gap:10px;padding:9px 20px;background:var(--panel2);cursor:pointer;user-select:none;border-bottom:1px solid var(--border)}
+.preview-toggle:hover{filter:brightness(1.08)}
+.preview-toggle-title{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.preview-toggle-meta{font-size:11px;color:var(--muted2)}
+.preview-toggle-chev{margin-left:auto;font-size:11px;color:var(--muted);transition:transform .15s}
+.preview-wrap.open .preview-toggle-chev{transform:rotate(180deg)}
+.preview-body{display:none;overflow-x:auto;max-height:420px;overflow-y:auto}
+.preview-wrap.open .preview-body{display:block}
+table.ptbl{border-collapse:collapse;font-size:10px;white-space:nowrap;width:100%}
+table.ptbl th{padding:5px 8px;background:var(--inset);border-bottom:2px solid var(--border2);border-right:1px solid var(--border);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0;z-index:2}
+table.ptbl td{padding:4px 8px;border-bottom:1px solid rgba(148,163,184,.06);border-right:1px solid rgba(148,163,184,.04);font-variant-numeric:tabular-nums}
+/* column group header colors */
+.th-id{color:var(--muted)}
+.th-35{color:#f59e0b}
+.th-40{color:#818cf8}
+.th-snap35{color:#fb923c}
+.th-snap40{color:#a78bfa}
+.th-out{color:var(--green);background:rgba(34,197,94,.06)!important}
+/* dimmed column group when inactive */
+table.ptbl th.dim,table.ptbl td.dim{opacity:.22}
+/* output column always highlighted */
+table.ptbl td.td-out{background:rgba(34,197,94,.07);color:var(--green);font-weight:700}
+/* row status */
+.ptbl tr.row-final td{background:rgba(94,234,212,.04)}
+.ptbl tr.row-final td:first-child{border-left:3px solid var(--teal)}
+.ptbl tr.row-noise td{background:rgba(251,191,36,.04);opacity:.55}
+.ptbl tr.row-noise td:first-child{border-left:3px solid var(--amber)}
+.ptbl tr.row-regime td{background:rgba(239,68,68,.04);opacity:.45}
+.ptbl tr.row-regime td:first-child{border-left:3px solid var(--red)}
+.ptbl tr.row-missing td{opacity:.25}
+.ptbl tr.row-missing td:first-child{border-left:3px solid var(--border2)}
+/* status badge */
+.st-badge{display:inline-block;padding:1px 5px;border-radius:4px;font-size:8px;font-weight:800;letter-spacing:.3px;white-space:nowrap}
+.st-final{background:rgba(94,234,212,.15);color:var(--teal)}
+.st-noise{background:rgba(251,191,36,.15);color:var(--amber)}
+.st-regime{background:rgba(239,68,68,.15);color:var(--red)}
+.st-missing{background:rgba(148,163,184,.1);color:var(--muted2)}
+/* group separator */
+table.ptbl th.grp-sep,table.ptbl td.grp-sep{border-left:2px solid var(--border2)}
+
 /* ── empty / status ── */
 .empty-msg{color:var(--muted2);text-align:center;padding:40px 20px;font-size:13px}
 .err{color:var(--red);background:var(--red-dim);border:1px solid var(--red-b);border-radius:6px;padding:8px 12px;font-size:12px;margin:12px 20px}
@@ -189,6 +231,16 @@ table.ftbl tr:hover td{background:rgba(148,163,184,.05)}
   <span>Low: <code id="colLL" style="color:var(--amber);background:rgba(251,191,36,.08);padding:1px 5px;border-radius:3px">—</code></span>
   <span>Output: <code id="colOut" style="color:var(--green);background:rgba(34,197,94,.08);padding:1px 5px;border-radius:3px">—</code></span>
   <span>Regime/context from: <code id="colSnap" style="color:var(--blue);background:rgba(96,165,250,.08);padding:1px 5px;border-radius:3px">—</code></span>
+</div>
+
+<!-- Data preview / debug table -->
+<div class="preview-wrap" id="previewWrap" style="display:none">
+  <div class="preview-toggle" onclick="document.getElementById('previewWrap').classList.toggle('open')">
+    <span class="preview-toggle-title">🔬 Data Preview — Debug Table</span>
+    <span class="preview-toggle-meta" id="previewMeta"></span>
+    <span class="preview-toggle-chev">▾</span>
+  </div>
+  <div class="preview-body" id="previewBody"></div>
 </div>
 
 <div id="errBar"></div>
@@ -381,49 +433,57 @@ function makeWorkingRow(row, suffix, snapPfx) {
 function runAnalysis() {
   const noisePct = Math.max(5, Math.min(49, parseInt(document.getElementById('noisePct').value)||30));
 
-  // Step 1: column selection — read the suffix matching the chosen slot for ALL rows.
+  // ── Step 1: column selection ──────────────────────────────────────
+  // Slot determines WHICH columns to read. Every row is processed using
+  // the suffix that matches the chosen slot. No rows are excluded here —
+  // only rows where the needed output column is missing are dropped.
   const suffix  = selectedSlot === '09:35' ? '35'      : '40';
   const snapPfx = selectedSlot === '09:35' ? 'snap935' : 'snap940';
-  let working = [];
+
+  const validRows   = [];  // have valid output for chosen slot+mode
+  const missingRows = [];  // output column missing/non-numeric → skipped
+
   allRows.forEach(row => {
     const r = makeWorkingRow(row, suffix, snapPfx);
-    if (r) working.push(r);
+    if (r) validRows.push(r);
+    else   missingRows.push({ ...row, _status: 'missing' });
   });
 
-  const afterSlot = working.length;
+  // ── Step 2: regime filter ─────────────────────────────────────────
+  const regimePassed = [];
+  const regimeFailed = [];
+  const filterAll = selectedRegimes.size >= availableRegimes.length;
+  validRows.forEach(r => {
+    if (filterAll || selectedRegimes.has(r._regime)) regimePassed.push(r);
+    else regimeFailed.push(r);
+  });
 
-  // Step 2: regime filter (uses the snapshot context matching the chosen slot)
-  if (selectedRegimes.size < availableRegimes.length) {
-    working = working.filter(r => selectedRegimes.has(r._regime));
-  }
-  const afterRegime = working.length;
-
-  // Step 3: all remaining rows have a valid output value
-  const afterOutput = working.length;
-
-  // Step 4: noise cut — keep top N% and bottom N%
-  const sorted = [...working].sort((a,b) => a._output - b._output);
-  const n = sorted.length;
+  // ── Step 3: noise cut ─────────────────────────────────────────────
+  // Sort by output, keep top N% and bottom N%, drop middle.
+  const sorted = [...regimePassed].sort((a,b) => a._output - b._output);
+  const n   = sorted.length;
   const cut = Math.round(n * noisePct / 100);
-  const final = n > 0 ? sorted.filter((_,i) => i < cut || i >= n - cut) : [];
+  const finalRows = n > 0 ? sorted.filter((_,i) => i < cut || i >= n - cut) : [];
+  const noiseRows = n > 0 ? sorted.filter((_,i) => i >= cut && i < n - cut)  : [];
 
-  // Resolve the active output column name for the current combination
-  const snap   = selectedSlot === '09:35' ? 'snap935' : 'snap940';
-  const outCol = selectedMode === 'up'   ? 'up_r'   + suffix
-               : selectedMode === 'down' ? 'down_r' + suffix
-               : 'max(up_r' + suffix + ', down_r' + suffix + ')';
+  // ── Resolve active column names ───────────────────────────────────
+  const snap      = snapPfx;
+  const outCol    = selectedMode === 'up'   ? 'up_r'   + suffix
+                  : selectedMode === 'down' ? 'down_r' + suffix
+                  : 'max(up_r' + suffix + ',down_r' + suffix + ')';
   const modeLabel = selectedMode === 'up' ? '↑ Up R' : selectedMode === 'down' ? '↓ Down R' : '⬆⬇ Max R';
 
-  // Update summary
+  // ── Summary bar ───────────────────────────────────────────────────
   document.getElementById('sTotal').textContent  = allRows.length;
-  document.getElementById('sSlot').textContent   = afterSlot;
-  document.getElementById('sRegime').textContent = afterRegime;
-  document.getElementById('sOutput').textContent = afterOutput;
-  document.getElementById('sFinal').textContent  = final.length;
+  document.getElementById('sSlot').textContent   = validRows.length;
+  document.getElementById('sRegime').textContent = regimePassed.length;
+  document.getElementById('sOutput').textContent = regimePassed.length;
+  document.getElementById('sFinal').textContent  = finalRows.length;
   document.getElementById('sOutputMode').textContent =
-    'Combination: ' + selectedSlot + ' × ' + modeLabel + ' → ' + outCol + ' · Noise cut: ±' + noisePct + '%';
+    'Combination: ' + selectedSlot + ' × ' + modeLabel + ' → ' + outCol +
+    ' · Noise cut: ±' + noisePct + '%';
 
-  // Update active-columns confirmation strip
+  // ── Active-columns strip ──────────────────────────────────────────
   document.getElementById('colStrip').style.display = 'flex';
   document.getElementById('colSlot').textContent  = selectedSlot + ' columns · all ' + allRows.length + ' rows';
   document.getElementById('colEntry').textContent = 'entry' + suffix;
@@ -432,8 +492,131 @@ function runAnalysis() {
   document.getElementById('colOut').textContent   = outCol;
   document.getElementById('colSnap').textContent  = snap + '_*';
 
-  // Render
-  renderAllFactors(final);
+  // ── Data preview table ────────────────────────────────────────────
+  // Passes EXACTLY the same row sets used for factor analysis.
+  renderDataTable(finalRows, noiseRows, regimeFailed, missingRows, suffix, outCol);
+
+  // ── Factor analysis ───────────────────────────────────────────────
+  // Uses the identical finalRows — same data as shown in the preview table.
+  renderAllFactors(finalRows);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DATA PREVIEW TABLE
+// Shows every CSV row with its status so the user can visually
+// verify the same data the factor analysis uses.
+// Row statuses:
+//   FINAL   — in the analysis set (teal)
+//   NOISE   — passed regime but cut as middle noise (amber)
+//   REGIME  — excluded by regime filter (red)
+//   MISSING — output column missing for chosen slot/mode (grey)
+// ══════════════════════════════════════════════════════════════════
+function renderDataTable(finalRows, noiseRows, regimeFailed, missingRows, suffix, outCol) {
+  const wrap = document.getElementById('previewWrap');
+  const body = document.getElementById('previewBody');
+  const meta = document.getElementById('previewMeta');
+
+  wrap.style.display = 'block';
+
+  const total = finalRows.length + noiseRows.length + regimeFailed.length + missingRows.length;
+  meta.textContent =
+    finalRows.length + ' FINAL · ' +
+    noiseRows.length + ' noise · ' +
+    regimeFailed.length + ' regime out · ' +
+    missingRows.length + ' missing — ' + total + ' total rows';
+
+  // Tag each working row with its status
+  const tagged = [
+    ...finalRows.map(r => ({ r, status:'final' })),
+    ...noiseRows.map(r => ({ r, status:'noise' })),
+    ...regimeFailed.map(r => ({ r, status:'regime' })),
+    ...missingRows.map(r => ({ r, status:'missing' })),
+  ];
+
+  // Sort by date then ticker for consistent ordering
+  tagged.sort((a,b) => {
+    const da = a.r.date || '', db = b.r.date || '';
+    if (da < db) return -1; if (da > db) return 1;
+    return (a.r.ticker||'').localeCompare(b.r.ticker||'');
+  });
+
+  const MAX_ROWS = 500;
+  const shown = tagged.slice(0, MAX_ROWS);
+
+  const is35 = suffix === '35';
+  const dim35 = !is35 ? ' dim' : '';
+  const dim40 =  is35 ? ' dim' : '';
+
+  // Column definitions: [key, label, thClass, tdClass, getValue]
+  const COLS = [
+    // status
+    ['_status', 'Status', 'th-id', '',       t => statusBadge(t.status)],
+    // identifiers
+    ['date',    'Date',   'th-id', '',       t => t.r.date   || ''],
+    ['ticker',  'Ticker', 'th-id', '',       t => t.r.ticker || ''],
+    // slot 35 group
+    ['entry35', 'entry35','th-35 grp-sep'+dim35, 'grp-sep'+dim35, t => t.r.entry35  || ''],
+    ['hh35',    'hh35',   'th-35'+dim35,         dim35,           t => t.r.hh35     || ''],
+    ['ll35',    'll35',   'th-35'+dim35,          dim35,          t => t.r.ll35     || ''],
+    ['up_r35',  'up_r35', 'th-35'+dim35,          dim35,          t => fmt(t.r.up_r35)],
+    ['down_r35','dn_r35', 'th-35'+dim35,          dim35,          t => fmt(t.r.down_r35)],
+    // slot 40 group
+    ['entry40', 'entry40','th-40 grp-sep'+dim40, 'grp-sep'+dim40, t => t.r.entry40  || ''],
+    ['hh40',    'hh40',   'th-40'+dim40,          dim40,          t => t.r.hh40     || ''],
+    ['ll40',    'll40',   'th-40'+dim40,          dim40,          t => t.r.ll40     || ''],
+    ['up_r40',  'up_r40', 'th-40'+dim40,          dim40,          t => fmt(t.r.up_r40)],
+    ['down_r40','dn_r40', 'th-40'+dim40,          dim40,          t => fmt(t.r.down_r40)],
+    // snap 935 context
+    ['s35_reg', 'snap935_regime', 'th-snap35 grp-sep'+dim35, 'grp-sep'+dim35, t => t.r.snap935_regime || ''],
+    ['s35_lt',  'snap935_lt',     'th-snap35'+dim35,           dim35,          t => t.r.snap935_lt    || ''],
+    ['s35_mt',  'snap935_mt',     'th-snap35'+dim35,           dim35,          t => t.r.snap935_mt    || ''],
+    ['s35_st',  'snap935_st',     'th-snap35'+dim35,           dim35,          t => t.r.snap935_st    || ''],
+    // snap 940 context
+    ['s40_reg', 'snap940_regime', 'th-snap40 grp-sep'+dim40, 'grp-sep'+dim40, t => t.r.snap940_regime || ''],
+    ['s40_lt',  'snap940_lt',     'th-snap40'+dim40,           dim40,          t => t.r.snap940_lt    || ''],
+    ['s40_mt',  'snap940_mt',     'th-snap40'+dim40,           dim40,          t => t.r.snap940_mt    || ''],
+    ['s40_st',  'snap940_st',     'th-snap40'+dim40,           dim40,          t => t.r.snap940_st    || ''],
+    // computed output
+    ['_output', outCol,  'th-out grp-sep', 'td-out grp-sep', t => t.r._output !== undefined ? fmt(t.r._output) : '—'],
+  ];
+
+  let html = '<table class="ptbl"><thead><tr>';
+  COLS.forEach(([,lbl,thCls]) => {
+    html += `<th class="${thCls}">${esc(lbl)}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  shown.forEach(t => {
+    const rowCls = 'row-' + t.status;
+    html += `<tr class="${rowCls}">`;
+    COLS.forEach(([key,,, tdCls, get]) => {
+      const val = get(t);
+      // status column contains HTML badge — don't escape it
+      const cell = key === '_status' ? val : esc(val);
+      html += `<td class="${tdCls}">${cell}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  if (tagged.length > MAX_ROWS) {
+    html += `<div style="padding:8px 12px;font-size:10px;color:var(--muted2)">Showing first ${MAX_ROWS} of ${tagged.length} rows. All rows are used in the factor analysis above.</div>`;
+  }
+
+  body.innerHTML = html;
+}
+
+function statusBadge(status) {
+  if (status === 'final')   return '<span class="st-badge st-final">✓ FINAL</span>';
+  if (status === 'noise')   return '<span class="st-badge st-noise">~ NOISE</span>';
+  if (status === 'regime')  return '<span class="st-badge st-regime">✗ REGIME</span>';
+  return '<span class="st-badge st-missing">— MISSING</span>';
+}
+
+function fmt(v) {
+  const n = parseFloat(v);
+  if (!isFinite(n)) return v || '—';
+  return n.toFixed(3);
 }
 
 // ══════════════════════════════════════════════════════════════════
