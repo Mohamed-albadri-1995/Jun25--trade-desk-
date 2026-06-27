@@ -157,7 +157,7 @@ var SCORE_FACTORS = [
     getValue: function(row) {
       var s = row.stock;
       if (!s || s.price == null || s.ema50 == null) return null;
-      return s.price >= s.ema50 ? 'Above EMA50' : 'Below EMA50';
+      return s.price >= s.ema50 ? 'Above' : 'Below';
     },
     matchBracket: function(val, brackets) {
       return brackets.find(function(b){return b.label === val;}) || null;
@@ -168,7 +168,7 @@ var SCORE_FACTORS = [
     getValue: function(row) {
       var s = row.stock;
       if (!s || s.price == null || s.sma5 == null) return null;
-      return s.price >= s.sma5 ? 'Above SMA5' : 'Below SMA5';
+      return s.price >= s.sma5 ? 'Above' : 'Below';
     },
     matchBracket: function(val, brackets) {
       return brackets.find(function(b){return b.label === val;}) || null;
@@ -207,7 +207,7 @@ var SCORE_FACTORS = [
     getValue: function(row) {
       var s = row.stock;
       if (!s || s.price == null || s.ema9 == null) return null;
-      return s.price >= s.ema9 ? 'Above EMA9' : 'Below EMA9';
+      return s.price >= s.ema9 ? 'Above' : 'Below';
     },
     matchBracket: function(val, brackets) {
       return brackets.find(function(b){return b.label === val;}) || null;
@@ -218,7 +218,7 @@ var SCORE_FACTORS = [
     getValue: function(row) {
       var s = row.stock;
       if (!s || s.price == null || s.ema13 == null) return null;
-      return s.price >= s.ema13 ? 'Above EMA13' : 'Below EMA13';
+      return s.price >= s.ema13 ? 'Above' : 'Below';
     },
     matchBracket: function(val, brackets) {
       return brackets.find(function(b){return b.label === val;}) || null;
@@ -229,7 +229,7 @@ var SCORE_FACTORS = [
     getValue: function(row) {
       var s = row.stock;
       if (!s || s.price == null || s.ema20 == null) return null;
-      return s.price >= s.ema20 ? 'Above EMA20' : 'Below EMA20';
+      return s.price >= s.ema20 ? 'Above' : 'Below';
     },
     matchBracket: function(val, brackets) {
       return brackets.find(function(b){return b.label === val;}) || null;
@@ -240,10 +240,11 @@ var SCORE_FACTORS = [
     getValue: function(row) {
       var v = row.stock && row.stock.monthRangePos;
       if (v == null || !isFinite(v)) return null;
-      if (v <= 25)  return 'Low (≤25%)';
-      if (v <= 50)  return 'Mid-low (25–50%)';
-      if (v <= 75)  return 'Mid-high (50–75%)';
-      return                'High (>75%)';
+      if (v < 20)  return '0–20% (near low)';
+      if (v < 40)  return '20–40%';
+      if (v < 60)  return '40–60% (mid)';
+      if (v < 80)  return '60–80%';
+      return               '80–100% (near high)';
     },
     matchBracket: function(val, brackets) {
       return brackets.find(function(b){return b.label === val;}) || null;
