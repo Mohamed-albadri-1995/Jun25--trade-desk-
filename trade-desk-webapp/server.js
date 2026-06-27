@@ -831,6 +831,72 @@ app.get('/factor-analysis.html', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'factor-analysis.html'));
 });
 
+// Merged register — same join as exportMergedRegisterCsv() in app.js, returned as JSON rows
+app.get('/api/merged-register', (req, res) => {
+  const allR1 = getAllFrozenScreener();
+  const allR3 = getAllEodOutcome();
+  const allR2 = getAllMarketSnapshots();
+  const n = v => (v != null && isFinite(v)) ? Number(v).toFixed(4) : '';
+  const catalystLabel = row => (row && row.catalyst && row.catalyst.label) ? row.catalyst.label : '';
+  const rows = [];
+  Object.keys(allR1).sort().forEach(date => {
+    const r1Day = allR1[date];
+    if (!r1Day || !r1Day.rows) return;
+    const r3Day   = allR3[date] || {};
+    const r2Day   = allR2[date] || {};
+    const snap935 = r2Day['09:35'] || null;
+    const snap940 = r2Day['09:40'] || null;
+    Object.keys(r1Day.rows).sort().forEach(ticker => {
+      const row = r1Day.rows[ticker], st = row.stock || {}, ctx = row.context || {};
+      const e3  = (r3Day.rows && r3Day.rows[ticker]) || {};
+      const sec = st.sector || '';
+      const sb935 = snap935 && snap935.sectors && snap935.sectors[sec] ? snap935.sectors[sec].bias : '';
+      const sb940 = snap940 && snap940.sectors && snap940.sectors[sec] ? snap940.sectors[sec].bias : '';
+      rows.push({
+        date, slot: r1Day.slot || '', captured_at: r1Day.capturedAt || '',
+        last_refreshed_at: row.lastUpdated ? new Date(row.lastUpdated).toISOString() : '',
+        complete: r1Day.complete ? 'true' : 'false', reason: r1Day.reason || '',
+        ticker, tv_symbol: st.tvSymbol || row.tvSymbol || '',
+        screeners: (row.screenerKeys || []).join('|'),
+        price: n(st.price), open: n(st.open), change_pct: n(st.change),
+        prev_close: n(st.prevClose), gap_pct: n(st.gapPct), vwap: n(st.vwap),
+        ema9: n(st.ema9), ema13: n(st.ema13), ema20: n(st.ema20), ema50: n(st.ema50), sma5: n(st.sma5),
+        month_high: n(st.monthHigh), month_low: n(st.monthLow),
+        day_high: n(st.dayHigh), day_low: n(st.dayLow), atr: n(st.atr),
+        pm_high: n(st.pmHigh), pm_low: n(st.pmLow), pm_range: n(st.pmRange),
+        adr_pct: n(st.adrPct), month_range_pos: n(st.monthRangePos), pm_adr_ratio: n(st.pmAdrRatio),
+        mcap: n(st.mcap), float_shares: n(st.floatShares), short_float: n(st.shortFloat),
+        rvol: n(st.rvol), rvat: n(st.rvat), catalyst: catalystLabel(row),
+        sector: sec, industry: st.industry || '',
+        st_bias: ctx.shortTerm || '', lt_bias: ctx.longTerm || '',
+        lt_label: ctx.longTermLabel || '', mid_term: ctx.midTerm || '',
+        mid_term_label: ctx.midTermLabel || '', sec_bias: ctx.secBias || '',
+        sec_score: n(ctx.secScore),
+        sec_hot: ctx.secHot != null ? (ctx.secHot ? 'true' : 'false') : '',
+        market_bias: ctx.marketBias || '',
+        entry35: n(e3.entry35), hh35: n(e3.hh35), ll35: n(e3.ll35),
+        down_r35: n(e3.downR35), up_r35: n(e3.upR35),
+        entry40: n(e3.entry40), hh40: n(e3.hh40), ll40: n(e3.ll40),
+        down_r40: n(e3.downR40), up_r40: n(e3.upR40),
+        eod_atr: n(e3.atr), eod_atr_source: e3.atrSource || '',
+        last_bar: e3.lastBarTime || '', fetched_at: e3.fetchedAt || '',
+        eod_status: e3.status || '',
+        snap935_lt:       snap935 ? ((snap935.longTerm  && snap935.longTerm.result)  || '') : '',
+        snap935_mt:       snap935 ? ((snap935.midTerm   && snap935.midTerm.result)   || '') : '',
+        snap935_st:       snap935 ? ((snap935.shortTerm && snap935.shortTerm.result) || '') : '',
+        snap935_regime:   snap935 ? ((snap935.regime    && snap935.regime.slug)      || '') : '',
+        snap935_sec_bias: sb935,
+        snap940_lt:       snap940 ? ((snap940.longTerm  && snap940.longTerm.result)  || '') : '',
+        snap940_mt:       snap940 ? ((snap940.midTerm   && snap940.midTerm.result)   || '') : '',
+        snap940_st:       snap940 ? ((snap940.shortTerm && snap940.shortTerm.result) || '') : '',
+        snap940_regime:   snap940 ? ((snap940.regime    && snap940.regime.slug)      || '') : '',
+        snap940_sec_bias: sb940
+      });
+    });
+  });
+  res.json({ ok: true, count: rows.length, rows });
+});
+
 // Status
 app.get('/api/status', (req, res) => {
   res.json({

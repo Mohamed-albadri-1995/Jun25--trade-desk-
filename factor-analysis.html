@@ -225,8 +225,12 @@ table.btbl td:first-child{text-align:left;color:var(--txt2)}
 <div id="uploadZone" class="upload-zone">
   <div style="font-size:28px">📂</div>
   <strong>Load merged register data</strong>
-  <p style="margin-bottom:12px">Drop a merged register CSV here, click to browse, or load directly from the extension registry.</p>
+  <p style="margin-bottom:12px">Load directly from the server, or drop / browse a CSV file.</p>
   <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap" onclick="event.stopPropagation()">
+    <button id="serverLoadBtn" onclick="loadFromServer()"
+      style="padding:9px 18px;border-radius:7px;border:1px solid rgba(94,234,212,.4);background:rgba(94,234,212,.08);color:var(--teal);font-size:12px;font-weight:700;cursor:pointer">
+      ⚡ Load from Server
+    </button>
     <button onclick="document.getElementById('fileInput').click()"
       style="padding:9px 18px;border-radius:7px;border:1px solid var(--border2);background:var(--inset);color:var(--txt2);font-size:12px;font-weight:700;cursor:pointer">
       📁 Browse CSV file
@@ -236,9 +240,11 @@ table.btbl td:first-child{text-align:left;color:var(--txt2)}
       🔗 Load from Extension Registry
     </button>
   </div>
-  <p id="regLoadNote" style="font-size:10px;color:var(--muted2);margin-top:8px;display:none">
-    Loads all registry records from the extension's storage — no file needed.<br>
-    <em>Note: outcome columns (entry35/up_r35 etc.) require a merged CSV with EOD data.</em>
+  <p id="serverLoadNote" style="font-size:10px;color:var(--muted2);margin-top:8px">
+    Pulls all registers (R1 screener + R2 snapshots + R3 EOD outcomes) directly from the server — no download needed.
+  </p>
+  <p id="regLoadNote" style="font-size:10px;color:var(--muted2);margin-top:4px;display:none">
+    Loads all registry records from the extension's storage — outcome columns require EOD data.
   </p>
   <input type="file" id="fileInput" accept=".csv">
 </div>
@@ -1459,6 +1465,33 @@ function csvCell(v) {
   return s.includes(',') || s.includes('"') || s.includes('\n')
     ? '"' + s.replace(/"/g, '""') + '"'
     : s;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SERVER DIRECT LOAD  (/api/merged-register)
+// Works when factor-analysis.html is served by the Trade Desk webapp.
+// ══════════════════════════════════════════════════════════════════
+function loadFromServer() {
+  const btn = document.getElementById('serverLoadBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Loading…'; }
+  fetch('/api/merged-register')
+    .then(function(res) {
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      return res.json();
+    })
+    .then(function(data) {
+      if (!data.ok || !data.rows || !data.rows.length) {
+        showErr('No data on server yet — run screeners and EOD outcome first.');
+        return;
+      }
+      loadData(data.rows);
+    })
+    .catch(function(err) {
+      showErr('Could not reach server: ' + err.message + ' — try uploading a CSV instead.');
+    })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.textContent = '⚡ Load from Server'; }
+    });
 }
 
 // ══════════════════════════════════════════════════════════════════
