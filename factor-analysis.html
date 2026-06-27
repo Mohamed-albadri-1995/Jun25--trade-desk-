@@ -561,6 +561,7 @@ function runAnalysis() {
   const n   = sorted.length;
   const cut = Math.round(n * noisePct / 100);
   const finalRows = n > 0 ? sorted.filter((_,i) => i < cut || i >= n - cut) : [];
+  _finalRows = finalRows;
   const noiseRows = n > 0 ? sorted.filter((_,i) => i >= cut && i < n - cut)  : [];
 
   // ── Resolve active column names ───────────────────────────────────
@@ -1209,6 +1210,7 @@ function spearmanRho(rows, getValue) {
 // CORRELATION SUMMARY RENDERER
 // ══════════════════════════════════════════════════════════════════
 let _corrData = []; // stored for CSV export
+let _finalRows = []; // stored for saveScoringModel()
 
 function renderCorrelationSummary(finalRows, threshold, outCol) {
   const sec = document.getElementById('correlationSection');
@@ -1469,7 +1471,7 @@ function saveScoringModel() {
     mode:          selectedMode,
     threshold,
     outCol:        outColText,
-    nRows:         finalRows.length,
+    nRows:         _finalRows.length,
     verdictFilter: filter,
     factors
   };
