@@ -2723,10 +2723,23 @@ function buildCard(row) {
       : '<div style="font-size:10px;font-weight:600;color:#fbbf24;margin:0 0 4px">○ Seen earlier today · refreshed ' + esc(fmtETTime(row.lastUpdated)) + ' ET</div>';
   }
 
+  // Score badge — green ≥60, amber 35–59, red <35, grey = no model
+  var scoreBadge = '';
+  if (row._score != null) {
+    var sc = row._score;
+    var scColor = sc >= 60 ? '#4ade80' : sc >= 35 ? '#fbbf24' : '#f87171';
+    var scMeta  = _scoringModel
+      ? (_scoringModel.slot || '') + ' · ' + (_scoringModel.mode || '') + ' · ' + (_scoringModel.threshold || '') + 'R · ' + (_scoringModel.verdictFilter || '')
+      : '';
+    scoreBadge = '<span title="Scoring model: ' + esc(scMeta) + '" style="margin-left:auto;font-size:10px;font-weight:700;color:' + scColor + ';border:1px solid ' + scColor + ';border-radius:5px;padding:2px 7px;white-space:nowrap">Score: ' + sc + '</span>';
+  } else if (_scoringModel) {
+    scoreBadge = '<span style="margin-left:auto;font-size:10px;font-weight:700;color:#475569;border:1px solid #334155;border-radius:5px;padding:2px 7px;white-space:nowrap">Score: —</span>';
+  }
+
   return '<div class="scr-card">' +
     '<div class="scr-hdr"><span class="scr-ticker tap" data-chart="' + esc(s.ticker) + '">' + esc(s.ticker) + '</span>' +
     (s.change != null ? '<span class="scr-chg ' + chgCls + '">' + (s.change >= 0 ? '+' : '') + s.change.toFixed(2) + '%</span>' : '') +
-    '<span class="scr-badges">' + badges + '</span>' + starBtn +
+    '<span class="scr-badges">' + badges + '</span>' + scoreBadge + starBtn +
     (s.sector ? '<span class="scr-sector">' + esc(s.sector) + (s.industry ? ' · ' + esc(s.industry) : '') + '</span>' : '') +
     '</div>' +
     regStatus +
@@ -2869,19 +2882,35 @@ function registryRefreshContext() {
 // Render the Screener result cards from today's registry rows (the only path
 // that fills #scrResults). Live candidates first, then by screeners matched,
 // then RVOL, then most-recently updated.
+var _scoringModel = null;
+function _loadScoringModel() {
+  return storageGet(['scoring_model']).then(function(r) {
+    _scoringModel = r.scoring_model || null;
+  }).catch(function() { _scoringModel = null; });
+}
+// Pre-load model once at startup; refreshed each time the screener renders
+_loadScoringModel();
+
 function renderScreenerFromRegistry() {
   registrySyncShortlist(); // stamp inShortlist from shortlist store before any card builds
   var rows = regTodayRows();
+  // Attach score to each row using the current scoring model
+  rows.forEach(function(row) {
+    row._score = (typeof scoreCard === 'function') ? scoreCard(row, _scoringModel) : null;
+  });
   rows.sort(function (a, b) {
     if (a.liveNow !== b.liveNow) return a.liveNow ? -1 : 1;
+    // Score desc (null scores sort last)
+    var sa = a._score != null ? a._score : -1, sb = b._score != null ? b._score : -1;
+    if (sa !== sb) return sb - sa;
     if (b.screenerKeys.length !== a.screenerKeys.length) return b.screenerKeys.length - a.screenerKeys.length;
-    var ra = (a.stock && a.stock.rvol) || 0, rb = (b.stock && b.stock.rvol) || 0;
-    if (rb !== ra) return rb - ra;
     return (b.lastUpdated || 0) - (a.lastUpdated || 0);
   });
   var host = $('scrResults');
   if (!rows.length) { host.innerHTML = '<div class="empty">No candidates yet today. Run a scan above.</div>'; return 0; }
   host.innerHTML = rows.map(function (row) { return buildCard(row); }).join('');
+  // Refresh model in background for next render
+  _loadScoringModel();
   return rows.length;
 }
 

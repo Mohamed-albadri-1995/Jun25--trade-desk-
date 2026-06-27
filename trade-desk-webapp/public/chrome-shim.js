@@ -30,6 +30,10 @@ async function _kvGet(key) {
     if (key === 'shortlists') {
       return await fetch('/api/shortlists').then(r => r.json());
     }
+    if (key === 'scoring_model') {
+      const d = await fetch('/api/scoring-model').then(r => r.json());
+      return d.model || null;
+    }
     if (key === 'smb_journal') {
       // Extension stores this as JSON.stringify(trades[]).
       const trades = await fetch('/api/journal').then(r => r.json());

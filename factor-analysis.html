@@ -804,6 +804,7 @@ const FACTOR_GROUPS = [
       { id:'industry',  label:'Industry',            fn: catBrackets(r => r.industry) },
       { id:'sec_bias',  label:'Sector bias (capture)', fn: catBrackets(r => r.sec_bias) },
       { id:'sec_hot',   label:'Sector hot',          fn: catBrackets(r => r.sec_hot === 'true' ? '🔥 Hot' : 'Not hot') },
+      { id:'catalyst',  label:'Catalyst',             fn: catBrackets(r => r.catalyst || 'None') },
     ]
   },
   {
@@ -1274,6 +1275,14 @@ function renderCorrelationSummary(finalRows, threshold, outCol) {
     <div class="export-row">
       <button class="exp-btn" onclick="exportCorrCSV()">⬇ CSV</button>
       <button class="exp-btn" onclick="window.print()">🖨 PDF</button>
+      <span style="width:1px;background:var(--border2);margin:0 4px;align-self:stretch"></span>
+      <select id="modelVerdictFilter" style="background:var(--inset);border:1px solid var(--border2);border-radius:6px;color:var(--txt2);font-size:11px;padding:4px 8px;cursor:pointer">
+        <option value="strong">Strong only</option>
+        <option value="strong+moderate" selected>Strong + Moderate</option>
+        <option value="all">All non-noise</option>
+      </select>
+      <button class="exp-btn" onclick="saveScoringModel()" style="background:rgba(94,234,212,.12);border-color:rgba(94,234,212,.4);color:var(--teal)" id="saveModelBtn">💾 Save as Scoring Model</button>
+      <span id="saveModelStatus" style="font-size:11px;color:var(--muted2);align-self:center"></span>
     </div>
   </div>
 
@@ -1417,6 +1426,72 @@ function bracketDetailHTML(d) {
 function toggleBracketDetail(id) {
   const el = document.getElementById(id);
   if (el) el.classList.toggle('open');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SCORING MODEL — save analysis results for live card scoring
+// ══════════════════════════════════════════════════════════════════
+function saveScoringModel() {
+  if (!_corrData.length) {
+    document.getElementById('saveModelStatus').textContent = '⚠ Run analysis first.';
+    return;
+  }
+  const filter  = document.getElementById('modelVerdictFilter').value;
+  const allowed = filter === 'strong'          ? ['strong']
+                : filter === 'strong+moderate' ? ['strong','moderate']
+                : ['strong','moderate','weak'];
+
+  const threshold  = parseFloat(document.getElementById('successThreshold').value) || 1.3;
+  const outColEl   = document.getElementById('colStripText');
+  const outColText = outColEl ? outColEl.textContent : '';
+
+  const factors = _corrData
+    .filter(d => allowed.includes(d.verdict))
+    .map(d => ({
+      id:      d.id,
+      label:   d.factor,
+      V:       Math.round(d.V * 10000) / 10000,
+      verdict: d.verdict,
+      brackets: (d.bracketStats || []).map(b => ({
+        label: b.label,
+        woe:   Math.round((b.woe || 0) * 10000) / 10000
+      }))
+    }));
+
+  if (!factors.length) {
+    document.getElementById('saveModelStatus').textContent = '⚠ No ' + filter + ' factors found.';
+    return;
+  }
+
+  const model = {
+    savedAt:       new Date().toISOString(),
+    slot:          selectedSlot,
+    mode:          selectedMode,
+    threshold,
+    outCol:        outColText,
+    nRows:         finalRows.length,
+    verdictFilter: filter,
+    factors
+  };
+
+  const btn = document.getElementById('saveModelBtn');
+  const status = document.getElementById('saveModelStatus');
+  btn.disabled = true;
+  status.textContent = '⏳ Saving…';
+
+  fetch('/api/scoring-model', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(model)
+  })
+    .then(r => r.json())
+    .then(d => {
+      status.textContent = d.ok
+        ? '✅ Saved — ' + factors.length + ' factors (' + filter + ')'
+        : '⚠ ' + (d.error || 'save failed');
+    })
+    .catch(e => { status.textContent = '⚠ ' + e.message; })
+    .finally(() => { btn.disabled = false; });
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1622,5 +1697,6 @@ function loadData(input) {
   }
 }
 </script>
+<script src="scoring-brackets.js"></script>
 </body>
 </html>

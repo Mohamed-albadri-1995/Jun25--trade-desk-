@@ -1139,6 +1139,19 @@ app.put('/api/kv/:key', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Scoring Model ─────────────────────────────────────────────────
+app.get('/api/scoring-model', (req, res) => {
+  const raw = getSetting('scoring_model', null);
+  if (!raw) return res.json({ ok: true, model: null });
+  try { res.json({ ok: true, model: JSON.parse(raw) }); }
+  catch { res.json({ ok: true, model: null }); }
+});
+app.post('/api/scoring-model', (req, res) => {
+  if (!req.body || !req.body.factors) return res.status(400).json({ ok: false, error: 'factors required' });
+  setSetting('scoring_model', JSON.stringify(req.body));
+  res.json({ ok: true });
+});
+
 // ── Live Market Data (proxy→buildMarketSnapshot) ──────────────────
 app.get('/api/market', async (req, res) => {
   try {
