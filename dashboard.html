@@ -146,6 +146,72 @@ table.ptbl th.grp-sep,table.ptbl td.grp-sep{border-left:2px solid var(--border2)
 .badge-bear{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.35)}
 .badge-neu{background:rgba(148,163,184,.12);color:var(--muted);border:1px solid var(--border2)}
 .badge-hot{background:rgba(251,146,60,.15);color:#fb923c;border:1px solid rgba(251,146,60,.4)}
+
+/* ── correlation section ── */
+.corr-hdr{display:flex;align-items:center;gap:14px;padding:20px 0 12px;flex-wrap:wrap}
+.corr-title{font-size:15px;font-weight:800;color:var(--teal)}
+.corr-baseline{font-size:11px;color:var(--muted2);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:5px 12px}
+.corr-baseline strong{color:var(--txt)}
+.export-row{display:flex;gap:8px;margin-left:auto}
+.exp-btn{padding:7px 16px;border-radius:7px;border:1px solid var(--border2);background:var(--inset);color:var(--muted);font-size:11px;font-weight:700;cursor:pointer}
+.exp-btn:hover{filter:brightness(1.3)}
+
+/* info box */
+.info-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;overflow:hidden}
+.info-box-hdr{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;user-select:none}
+.info-box-hdr:hover{filter:brightness(1.1)}
+.info-box-title{font-size:11px;font-weight:800;color:var(--blue)}
+.info-box-body{display:none;padding:0 14px 14px;font-size:11px;color:var(--muted2);line-height:1.7}
+.info-box.open .info-box-body{display:block}
+.info-box-body dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin-top:8px}
+.info-box-body dt{font-weight:700;color:var(--txt2);white-space:nowrap}
+.info-box-body dd{margin:0}
+.info-box-body .rule-row{margin-top:8px;display:flex;gap:20px;flex-wrap:wrap}
+.info-box-body .rule-chip{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700}
+
+/* correlation table */
+.corr-tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:6px}
+table.ctbl{border-collapse:collapse;width:100%;font-size:11px;white-space:nowrap}
+table.ctbl th{padding:7px 10px;background:var(--inset);color:var(--muted);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border2);text-align:center}
+table.ctbl th:first-child{text-align:left}
+table.ctbl td{padding:6px 10px;border-bottom:1px solid rgba(148,163,184,.07);text-align:center;font-variant-numeric:tabular-nums}
+table.ctbl td:first-child{text-align:left;font-weight:700;color:var(--txt2);cursor:pointer}
+table.ctbl td:first-child:hover{color:var(--teal)}
+table.ctbl tr:last-child td{border-bottom:none}
+table.ctbl tr:hover td{background:rgba(148,163,184,.04)}
+/* verdict chips */
+.v-strong{color:#4ade80;font-weight:800}
+.v-moderate{color:var(--amber);font-weight:700}
+.v-weak{color:var(--muted);font-weight:600}
+.v-noise{color:var(--muted2)}
+/* stat value coloring */
+.stat-hi{color:var(--green);font-weight:700}
+.stat-mid{color:var(--amber);font-weight:700}
+.stat-lo{color:var(--muted2)}
+.stat-neg{color:var(--red);font-weight:700}
+/* bracket detail panel */
+.bracket-detail{display:none;background:var(--inset);border-top:1px solid var(--border2);padding:10px 14px}
+.bracket-detail.open{display:block}
+table.btbl{border-collapse:collapse;width:100%;font-size:10px}
+table.btbl th{padding:4px 8px;color:var(--muted2);font-size:9px;font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);text-align:center}
+table.btbl th:first-child{text-align:left}
+table.btbl td{padding:4px 8px;border-bottom:1px solid rgba(148,163,184,.05);text-align:center;font-variant-numeric:tabular-nums}
+table.btbl td:first-child{text-align:left;color:var(--txt2)}
+.woe-pos{color:var(--green)}
+.woe-neg{color:var(--red)}
+/* print */
+@media print{
+  .hdr,.controls,.upload-zone,.summary,.colStrip,.preview-wrap,.corr-hdr .export-row,
+  #errBar,.fsec,#content{display:none!important}
+  #correlationSection{display:block!important;padding:0}
+  .corr-hdr .export-row{display:none!important}
+  body{background:#fff;color:#000}
+  .corr-title{color:#0f4c75}
+  .info-box-body dt{color:#333}
+  .corr-tbl-wrap{border:1px solid #ccc}
+  table.ctbl th{background:#f0f0f0;color:#333}
+  .bracket-detail{display:block!important}
+}
 </style>
 </head>
 <body>
@@ -192,6 +258,16 @@ table.ptbl th.grp-sep,table.ptbl td.grp-sep{border-left:2px solid var(--border2)
     <div class="output-row">
       <input type="number" class="noise-input" id="noisePct" value="30" min="5" max="49" step="1"> %
       <span style="font-size:11px;color:var(--muted)">(drops middle <span id="noiseMiddle">40</span>%)</span>
+    </div>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="ctrl-group">
+    <div class="ctrl-label">Success Threshold (R)</div>
+    <div class="output-row">
+      <input type="number" class="noise-input" id="successThreshold" value="1.3" min="0.1" max="10" step="0.1" style="width:65px"> R
+      <span style="font-size:11px;color:var(--muted)">output ≥ this = success</span>
     </div>
   </div>
 
@@ -245,6 +321,7 @@ table.ptbl th.grp-sep,table.ptbl td.grp-sep{border-left:2px solid var(--border2)
 
 <div id="errBar"></div>
 <div id="content"><div class="empty-msg">Load a merged register CSV to begin analysis.</div></div>
+<div id="correlationSection" style="display:none;padding:0 20px 60px"></div>
 
 <script>
 'use strict';
@@ -499,6 +576,10 @@ function runAnalysis() {
   // ── Factor analysis ───────────────────────────────────────────────
   // Uses the identical finalRows — same data as shown in the preview table.
   renderAllFactors(finalRows);
+
+  // ── Statistical correlation summary ──────────────────────────────
+  const threshold = Math.max(0.1, parseFloat(document.getElementById('successThreshold').value) || 1.3);
+  renderCorrelationSummary(finalRows, threshold, outCol);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -708,7 +789,7 @@ const FACTOR_GROUPS = [
   {
     title: '📈 Price Action',
     factors: [
-      { id:'price', label:'Price ($)', fn: numBrackets(r => pf(r,'price'), [
+      { id:'price', label:'Price ($)', getValue: r => pf(r,'price'), fn: numBrackets(r => pf(r,'price'), [
           {label:'<$2',     test:v=>v<2},
           {label:'$2–5',    test:v=>v>=2&&v<5},
           {label:'$5–10',   test:v=>v>=5&&v<10},
@@ -716,7 +797,7 @@ const FACTOR_GROUPS = [
           {label:'$20–50',  test:v=>v>=20&&v<50},
           {label:'$50+',    test:v=>v>=50},
         ])},
-      { id:'change_pct', label:'Change % (day)', fn: numBrackets(r => pf(r,'change_pct'), [
+      { id:'change_pct', label:'Change % (day)', getValue: r => pf(r,'change_pct'), fn: numBrackets(r => pf(r,'change_pct'), [
           {label:'<10%',     test:v=>v<10},
           {label:'10–25%',   test:v=>v>=10&&v<25},
           {label:'25–50%',   test:v=>v>=25&&v<50},
@@ -724,7 +805,7 @@ const FACTOR_GROUPS = [
           {label:'>100%',    test:v=>v>=100},
           {label:'Negative', test:v=>v<0},
         ])},
-      { id:'gap_pct', label:'Gap % (vs prev close)', fn: numBrackets(r => pf(r,'gap_pct'), [
+      { id:'gap_pct', label:'Gap % (vs prev close)', getValue: r => pf(r,'gap_pct'), fn: numBrackets(r => pf(r,'gap_pct'), [
           {label:'Neg gap',   test:v=>v<0},
           {label:'0–10%',     test:v=>v>=0&&v<10},
           {label:'10–30%',    test:v=>v>=10&&v<30},
@@ -750,28 +831,28 @@ const FACTOR_GROUPS = [
   {
     title: '📊 Volume & Float',
     factors: [
-      { id:'rvol', label:'RVOL (10d)', fn: numBrackets(r => pf(r,'rvol'), [
+      { id:'rvol', label:'RVOL (10d)', getValue: r => pf(r,'rvol'), fn: numBrackets(r => pf(r,'rvol'), [
           {label:'<5x',     test:v=>v<5},
           {label:'5–20x',   test:v=>v>=5&&v<20},
           {label:'20–50x',  test:v=>v>=20&&v<50},
           {label:'50–200x', test:v=>v>=50&&v<200},
           {label:'>200x',   test:v=>v>=200},
         ])},
-      { id:'mcap', label:'Market Cap', fn: numBrackets(r => pf(r,'mcap'), [
+      { id:'mcap', label:'Market Cap', getValue: r => pf(r,'mcap'), fn: numBrackets(r => pf(r,'mcap'), [
           {label:'<$10M',    test:v=>v<10e6},
           {label:'$10–50M',  test:v=>v>=10e6&&v<50e6},
           {label:'$50–200M', test:v=>v>=50e6&&v<200e6},
           {label:'$200M–1B', test:v=>v>=200e6&&v<1e9},
           {label:'>$1B',     test:v=>v>=1e9},
         ])},
-      { id:'float', label:'Float shares', fn: numBrackets(r => pf(r,'float_shares'), [
+      { id:'float', label:'Float shares', getValue: r => pf(r,'float_shares'), fn: numBrackets(r => pf(r,'float_shares'), [
           {label:'<1M',    test:v=>v<1e6},
           {label:'1–5M',   test:v=>v>=1e6&&v<5e6},
           {label:'5–20M',  test:v=>v>=5e6&&v<20e6},
           {label:'20–100M',test:v=>v>=20e6&&v<100e6},
           {label:'>100M',  test:v=>v>=100e6},
         ])},
-      { id:'short_float', label:'Short float %', fn: numBrackets(r => pf(r,'short_float'), [
+      { id:'short_float', label:'Short float %', getValue: r => pf(r,'short_float'), fn: numBrackets(r => pf(r,'short_float'), [
           {label:'Unknown',  test:v=>!isFinite(v)},
           {label:'<5%',      test:v=>isFinite(v)&&v<5},
           {label:'5–15%',    test:v=>v>=5&&v<15},
@@ -783,27 +864,27 @@ const FACTOR_GROUPS = [
   {
     title: '🌋 Volatility & Range',
     factors: [
-      { id:'atr', label:'ATR ($)', fn: numBrackets(r => pf(r,'atr'), [
+      { id:'atr', label:'ATR ($)', getValue: r => pf(r,'atr'), fn: numBrackets(r => pf(r,'atr'), [
           {label:'<$0.20',  test:v=>v<0.2},
           {label:'$0.20–0.50', test:v=>v>=0.2&&v<0.5},
           {label:'$0.50–1', test:v=>v>=0.5&&v<1},
           {label:'$1–3',    test:v=>v>=1&&v<3},
           {label:'>$3',     test:v=>v>=3},
         ])},
-      { id:'adr_pct', label:'ADR %', fn: numBrackets(r => pf(r,'adr_pct'), [
+      { id:'adr_pct', label:'ADR %', getValue: r => pf(r,'adr_pct'), fn: numBrackets(r => pf(r,'adr_pct'), [
           {label:'<5%',    test:v=>v<5},
           {label:'5–10%',  test:v=>v>=5&&v<10},
           {label:'10–20%', test:v=>v>=10&&v<20},
           {label:'20–30%', test:v=>v>=20&&v<30},
           {label:'>30%',   test:v=>v>=30},
         ])},
-      { id:'pm_range', label:'PM Range ($)', fn: numBrackets(r => pf(r,'pm_range'), [
+      { id:'pm_range', label:'PM Range ($)', getValue: r => pf(r,'pm_range'), fn: numBrackets(r => pf(r,'pm_range'), [
           {label:'<$0.3',  test:v=>v<0.3},
           {label:'$0.3–1', test:v=>v>=0.3&&v<1},
           {label:'$1–3',   test:v=>v>=1&&v<3},
           {label:'>$3',    test:v=>v>=3},
         ])},
-      { id:'pm_adr', label:'PM Range / ADR ratio', fn: numBrackets(r => pf(r,'pm_adr_ratio'), [
+      { id:'pm_adr', label:'PM Range / ADR ratio', getValue: r => pf(r,'pm_adr_ratio'), fn: numBrackets(r => pf(r,'pm_adr_ratio'), [
           {label:'<0.5',   test:v=>v<0.5},
           {label:'0.5–1',  test:v=>v>=0.5&&v<1},
           {label:'1–2',    test:v=>v>=1&&v<2},
@@ -815,7 +896,7 @@ const FACTOR_GROUPS = [
   {
     title: '🗺 Sector Score',
     factors: [
-      { id:'sec_score', label:'Sector score', fn: numBrackets(r => pf(r,'sec_score'), [
+      { id:'sec_score', label:'Sector score', getValue: r => pf(r,'sec_score'), fn: numBrackets(r => pf(r,'sec_score'), [
           {label:'<−50 (very bearish)', test:v=>v<-50},
           {label:'−50 to −20',         test:v=>v>=-50&&v<-20},
           {label:'−20 to +20 (neutral)',test:v=>v>=-20&&v<=20},
@@ -980,6 +1061,390 @@ function showErr(msg) {
 }
 function clearErr() {
   document.getElementById('errBar').innerHTML = '';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STATISTICS LIBRARY (pure JS, no external dependencies)
+// ══════════════════════════════════════════════════════════════════
+
+// Standard normal CDF — Abramowitz & Stegun approximation (error < 7.5e-8)
+function normalCDF(z) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp(-z * z / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.7814779 + t * (-1.8212560 + t * 1.3302744))));
+  return z >= 0 ? 1 - p : p;
+}
+
+// Chi-square p-value via Wilson–Hilferty normal approximation
+function chiSquarePValue(chi2, df) {
+  if (df <= 0 || chi2 <= 0) return 1;
+  const mu = 1 - 2 / (9 * df);
+  const sigma = Math.sqrt(2 / (9 * df));
+  const z = (Math.cbrt(chi2 / df) - mu) / sigma;
+  return 1 - normalCDF(z);
+}
+
+// Chi-square statistic + Cramér's V from bracket list and binary success test.
+// Cramér's V: sqrt(χ² / (n × (min(r,c)−1))).
+// Here the contingency table is 2 rows (success / fail) × k columns (brackets).
+// So min(r,c)−1 = min(2,k)−1 = 1  (for k≥2), simplifying to V = sqrt(χ²/n).
+function chiSquareAndV(brackets, successTest) {
+  const activeBrackets = brackets.filter(b => b.rows.length > 0);
+  const k = activeBrackets.length;
+  if (k < 2) return { chi2: 0, V: 0, p: 1, df: 0 };
+
+  const n          = activeBrackets.reduce((s, b) => s + b.rows.length, 0);
+  const totalS     = activeBrackets.reduce((s, b) => s + b.rows.filter(successTest).length, 0);
+  const totalF     = n - totalS;
+  if (totalS === 0 || totalF === 0) return { chi2: 0, V: 0, p: 1, df: k - 1 };
+
+  let chi2 = 0;
+  activeBrackets.forEach(b => {
+    const obsS = b.rows.filter(successTest).length;
+    const obsF = b.rows.length - obsS;
+    const expS = b.rows.length * totalS / n;
+    const expF = b.rows.length * totalF / n;
+    if (expS > 0.5) chi2 += (obsS - expS) ** 2 / expS;
+    if (expF > 0.5) chi2 += (obsF - expF) ** 2 / expF;
+  });
+
+  const df = k - 1;
+  const V  = Math.min(Math.sqrt(chi2 / n), 1); // minDim-1 = 1 for 2-row table
+  const p  = chiSquarePValue(chi2, df);
+  return { chi2, V, p, df };
+}
+
+// Information Value (IV) and per-bracket Weight of Evidence (WoE).
+// WoE_i = ln(% events in bucket i / % non-events in bucket i).
+// IV = Σ (distrib_events − distrib_nonevents) × WoE.
+// IV interpretation: <0.02 = useless, 0.02–0.1 = weak, 0.1–0.3 = medium, >0.3 = strong.
+function infoValue(brackets, successTest) {
+  const totalS = brackets.reduce((s, b) => s + b.rows.filter(successTest).length, 0);
+  const totalF = brackets.reduce((s, b) => s + b.rows.filter(r => !successTest(r)).length, 0);
+  if (!totalS || !totalF) return { iv: 0, detail: [] };
+
+  let iv = 0;
+  const detail = brackets.map(b => {
+    const s  = b.rows.filter(successTest).length;
+    const f  = b.rows.length - s;
+    const ds = (s / totalS) || 1e-9;   // distribution of successes
+    const df = (f / totalF) || 1e-9;   // distribution of failures
+    const woe    = Math.log(ds / df);
+    const contrib = (ds - df) * woe;
+    iv += contrib;
+    return { label: b.label, n: b.rows.length, s, f, ds, df, woe, contrib };
+  });
+
+  return { iv: Math.max(0, iv), detail };
+}
+
+// Eta-squared (η²): proportion of variance in _output explained by bracket membership.
+// η² = SS_between / SS_total.  Interpretation: <0.01 small, 0.01–0.06 medium, ≥0.14 large.
+function etaSquared(brackets) {
+  const allRows  = brackets.flatMap(b => b.rows);
+  const n        = allRows.length;
+  if (n < 2) return null;
+  const grandMean = allRows.reduce((s, r) => s + r._output, 0) / n;
+  const ssTotal   = allRows.reduce((s, r) => s + (r._output - grandMean) ** 2, 0);
+  if (ssTotal === 0) return null;
+  const ssBetween = brackets.reduce((s, b) => {
+    if (!b.rows.length) return s;
+    const bMean = b.rows.reduce((a, r) => a + r._output, 0) / b.rows.length;
+    return s + b.rows.length * (bMean - grandMean) ** 2;
+  }, 0);
+  return Math.min(ssBetween / ssTotal, 1);
+}
+
+// Spearman rank correlation between raw factor value and _output.
+// Used for numeric factors to detect monotonic relationships.
+function spearmanRho(rows, getValue) {
+  const pairs = rows.map(r => ({ x: getValue(r), y: r._output }))
+                    .filter(p => isFinite(p.x) && isFinite(p.y));
+  const n = pairs.length;
+  if (n < 5) return null;
+
+  function assignRanks(vals) {
+    const sorted = vals.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+    const ranks  = new Array(n);
+    let i = 0;
+    while (i < n) {
+      let j = i;
+      while (j < n - 1 && sorted[j + 1].v === sorted[j].v) j++;
+      const avg = (i + j) / 2 + 1;
+      for (let k = i; k <= j; k++) ranks[sorted[k].i] = avg;
+      i = j + 1;
+    }
+    return ranks;
+  }
+
+  const rx = assignRanks(pairs.map(p => p.x));
+  const ry = assignRanks(pairs.map(p => p.y));
+  let sumD2 = 0;
+  for (let i = 0; i < n; i++) sumD2 += (rx[i] - ry[i]) ** 2;
+  return 1 - (6 * sumD2) / (n * (n * n - 1));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CORRELATION SUMMARY RENDERER
+// ══════════════════════════════════════════════════════════════════
+let _corrData = []; // stored for CSV export
+
+function renderCorrelationSummary(finalRows, threshold, outCol) {
+  const sec = document.getElementById('correlationSection');
+  if (!finalRows.length) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+
+  const successTest = r => r._output >= threshold;
+  const nSuccess    = finalRows.filter(successTest).length;
+  const basePct     = (nSuccess / finalRows.length * 100).toFixed(1);
+
+  // ── Compute stats for every factor ──────────────────────────────
+  _corrData = [];
+  FACTOR_GROUPS.forEach(group => {
+    group.factors.forEach(factor => {
+      const brackets = factor.fn(finalRows).filter(b => b.rows.length >= 1);
+      if (brackets.length < 2) return;
+
+      const cv    = chiSquareAndV(brackets, successTest);
+      const ivRes = infoValue(brackets, successTest);
+      const η2    = etaSquared(brackets);
+      const rho   = factor.getValue ? spearmanRho(finalRows, factor.getValue) : null;
+
+      // Success rate per bracket (for bracket detail table)
+      const bracketStats = ivRes.detail.map(d => {
+        const rate = d.n ? d.s / d.n : null;
+        return { ...d, rate };
+      });
+
+      // Verdict based on Cramér's V primary, IV secondary
+      const verdict = cv.V >= 0.40                        ? 'strong'
+                    : cv.V >= 0.20 || ivRes.iv >= 0.10    ? 'moderate'
+                    : cv.V >= 0.10 || ivRes.iv >= 0.02    ? 'weak'
+                    : 'noise';
+
+      _corrData.push({
+        group: group.title,
+        factor: factor.label,
+        id: factor.id,
+        V: cv.V,
+        chi2: cv.chi2,
+        df: cv.df,
+        p: cv.p,
+        iv: ivRes.iv,
+        eta2: η2,
+        rho,
+        verdict,
+        bracketStats,
+        basePct: nSuccess / finalRows.length,
+      });
+    });
+  });
+
+  // Sort by Cramér's V descending (strongest signal first)
+  _corrData.sort((a, b) => b.V - a.V);
+
+  // ── Build HTML ───────────────────────────────────────────────────
+  let html = `
+  <div class="corr-hdr">
+    <span class="corr-title">🧮 Statistical Correlation Analysis</span>
+    <span class="corr-baseline">
+      Baseline success rate: <strong>${basePct}%</strong>
+      (${nSuccess} / ${finalRows.length} rows reached ≥${threshold}R on ${esc(outCol)})
+    </span>
+    <div class="export-row">
+      <button class="exp-btn" onclick="exportCorrCSV()">⬇ CSV</button>
+      <button class="exp-btn" onclick="window.print()">🖨 PDF</button>
+    </div>
+  </div>
+
+  <div class="info-box" id="infoBox">
+    <div class="info-box-hdr" onclick="document.getElementById('infoBox').classList.toggle('open')">
+      <span style="font-size:13px">ℹ️</span>
+      <span class="info-box-title">How to interpret these statistics — click to expand</span>
+    </div>
+    <div class="info-box-body">
+      <p>Each row represents one factor. The statistics measure whether that factor's brackets
+      (e.g. "Bullish / Bearish" for regime, "$5–10 / $10–20" for price) produce meaningfully
+      different success rates. <strong>Success</strong> = output ≥ ${threshold}R on <em>${esc(outCol)}</em>.</p>
+      <dl>
+        <dt>Cramér's V</dt>
+        <dd>Strength of association between the factor's brackets and success/fail outcome.
+            Computed from the chi-square statistic on a 2×k contingency table.
+            Range 0–1. <em>V ≥ 0.40 strong · 0.20–0.39 moderate · 0.10–0.19 weak · &lt;0.10 noise.</em></dd>
+        <dt>p-value</dt>
+        <dd>Probability the observed association is due to random chance (Wilson–Hilferty
+            approximation of the chi-square distribution).
+            <em>p &lt; 0.05 = statistically significant · p &lt; 0.001 = very significant.</em></dd>
+        <dt>IV (Information Value)</dt>
+        <dd>Measures how well the factor separates winners from losers using
+            Weight of Evidence (WoE = ln(% winners in bucket / % losers in bucket)).
+            IV = Σ (distrib_winners − distrib_losers) × WoE.
+            <em>&lt;0.02 useless · 0.02–0.09 weak · 0.10–0.29 medium · ≥0.30 strong.</em></dd>
+        <dt>η² (Eta-squared)</dt>
+        <dd>ANOVA effect size: proportion of variance in the raw output value explained
+            by bracket membership. SS_between / SS_total.
+            <em>&lt;0.01 small · 0.01–0.06 medium · ≥0.14 large.</em></dd>
+        <dt>Spearman ρ</dt>
+        <dd>Rank correlation between the raw numeric value and raw output (numeric factors only).
+            Detects monotonic relationships without assuming linearity.
+            <em>|ρ| ≥ 0.5 strong · 0.3–0.5 moderate · &lt;0.3 weak.
+            Positive = higher value → bigger output. Negative = inverse.</em></dd>
+      </dl>
+      <div class="rule-row">
+        <span class="rule-chip" style="background:rgba(74,222,128,.15);color:#4ade80">●● Strong signal</span>
+        <span class="rule-chip" style="background:rgba(251,191,36,.15);color:var(--amber)">● Moderate signal</span>
+        <span class="rule-chip" style="background:rgba(148,163,184,.1);color:var(--muted)">◌ Weak signal</span>
+        <span class="rule-chip" style="background:rgba(100,116,139,.08);color:var(--muted2)">— Noise</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="corr-tbl-wrap">
+  <table class="ctbl">
+  <thead><tr>
+    <th style="text-align:left">Factor</th>
+    <th>Cramér's V</th>
+    <th>p-value</th>
+    <th>IV</th>
+    <th>η²</th>
+    <th>Spearman ρ</th>
+    <th>Verdict</th>
+  </tr></thead>
+  <tbody>`;
+
+  _corrData.forEach((d, i) => {
+    const verdictHtml =
+      d.verdict === 'strong'   ? '<span class="v-strong">●● Strong</span>'
+    : d.verdict === 'moderate' ? '<span class="v-moderate">● Moderate</span>'
+    : d.verdict === 'weak'     ? '<span class="v-weak">◌ Weak</span>'
+    :                            '<span class="v-noise">— Noise</span>';
+
+    const fmtV   = d.V.toFixed(3);
+    const fmtP   = d.p < 0.001 ? '<0.001' : d.p < 0.01 ? d.p.toFixed(3) : d.p.toFixed(2);
+    const fmtIV  = d.iv.toFixed(3);
+    const fmtEta = d.eta2 !== null ? d.eta2.toFixed(3) : '—';
+    const fmtRho = d.rho !== null  ? (d.rho >= 0 ? '+' : '') + d.rho.toFixed(3) : '—';
+
+    const vCls  = d.V   >= 0.40 ? 'stat-hi' : d.V   >= 0.20 ? 'stat-mid' : 'stat-lo';
+    const pCls  = d.p   <  0.05 ? 'stat-hi' : d.p   < 0.10  ? 'stat-mid' : 'stat-lo';
+    const ivCls = d.iv  >= 0.10 ? 'stat-hi' : d.iv  >= 0.02 ? 'stat-mid' : 'stat-lo';
+    const eCls  = d.eta2 !== null
+                  ? (d.eta2 >= 0.14 ? 'stat-hi' : d.eta2 >= 0.01 ? 'stat-mid' : 'stat-lo')
+                  : 'stat-lo';
+    const rhoCls = d.rho !== null
+                  ? (Math.abs(d.rho) >= 0.5 ? (d.rho > 0 ? 'stat-hi' : 'stat-neg')
+                   : Math.abs(d.rho) >= 0.3 ? (d.rho > 0 ? 'stat-mid' : 'stat-neg')
+                   : 'stat-lo')
+                  : 'stat-lo';
+
+    const detailId = `bdet_${i}`;
+
+    html += `<tr onclick="toggleBracketDetail('${detailId}')">
+      <td title="Click to expand bracket detail">${esc(d.factor)} <span style="font-size:9px;color:var(--muted2)">${esc(d.group.replace(/^[^ ]+ /,''))}</span></td>
+      <td class="${vCls}">${fmtV}</td>
+      <td class="${pCls}">${fmtP}</td>
+      <td class="${ivCls}">${fmtIV}</td>
+      <td class="${eCls}">${fmtEta}</td>
+      <td class="${rhoCls}">${fmtRho}</td>
+      <td>${verdictHtml}</td>
+    </tr>
+    <tr><td colspan="7" style="padding:0">
+      <div class="bracket-detail" id="${detailId}">
+        ${bracketDetailHTML(d)}
+      </div>
+    </td></tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  sec.innerHTML = html;
+}
+
+function bracketDetailHTML(d) {
+  if (!d.bracketStats.length) return '<em style="color:var(--muted2)">No bracket data.</em>';
+  const baseRate = d.basePct;
+
+  let h = `<table class="btbl"><thead><tr>
+    <th style="text-align:left">Bracket</th>
+    <th>N</th><th>Success</th><th>Rate</th><th>vs Baseline</th>
+    <th>WoE</th><th>IV contrib</th>
+  </tr></thead><tbody>`;
+
+  d.bracketStats.forEach(b => {
+    const ratePct  = b.rate !== null ? (b.rate * 100).toFixed(1) + '%' : '—';
+    const delta    = b.rate !== null ? b.rate - baseRate : null;
+    const deltaTxt = delta !== null ? (delta >= 0 ? '+' : '') + (delta * 100).toFixed(1) + 'pp' : '—';
+    const deltaCls = delta === null ? '' : delta > 0.1 ? 'stat-hi' : delta < -0.1 ? 'stat-neg' : 'stat-lo';
+    const woeTxt   = isFinite(b.woe) ? (b.woe >= 0 ? '+' : '') + b.woe.toFixed(3) : '—';
+    const woeCls   = b.woe > 0 ? 'woe-pos' : b.woe < 0 ? 'woe-neg' : '';
+    const ivTxt    = isFinite(b.contrib) ? b.contrib.toFixed(4) : '—';
+    const lowData  = b.n < 5 ? ' <span style="font-size:9px;color:var(--muted2)">(low n)</span>' : '';
+
+    h += `<tr>
+      <td>${esc(b.label)}${lowData}</td>
+      <td>${b.n}</td>
+      <td>${b.s}</td>
+      <td>${ratePct}</td>
+      <td class="${deltaCls}">${deltaTxt}</td>
+      <td class="${woeCls}">${woeTxt}</td>
+      <td>${ivTxt}</td>
+    </tr>`;
+  });
+
+  h += '</tbody></table>';
+  return h;
+}
+
+function toggleBracketDetail(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXPORTS
+// ══════════════════════════════════════════════════════════════════
+function exportCorrCSV() {
+  if (!_corrData.length) return;
+  const threshold = parseFloat(document.getElementById('successThreshold').value) || 1.3;
+
+  const headers = ['Group','Factor','Bracket','N','Success','Success%','vs Baseline (pp)',
+                   'WoE','IV Contrib','Cramers_V','Chi2','df','p_value','IV','Eta2','Spearman_rho','Verdict'];
+
+  const rows = [headers.join(',')];
+  _corrData.forEach(d => {
+    d.bracketStats.forEach(b => {
+      const delta = b.rate !== null ? ((b.rate - d.basePct) * 100).toFixed(2) : '';
+      rows.push([
+        csvCell(d.group), csvCell(d.factor), csvCell(b.label),
+        b.n, b.s,
+        b.rate !== null ? (b.rate * 100).toFixed(2) : '',
+        delta,
+        isFinite(b.woe)    ? b.woe.toFixed(4)    : '',
+        isFinite(b.contrib)? b.contrib.toFixed(4) : '',
+        d.V.toFixed(4),
+        d.chi2.toFixed(4),
+        d.df,
+        d.p.toFixed(4),
+        d.iv.toFixed(4),
+        d.eta2 !== null ? d.eta2.toFixed(4) : '',
+        d.rho  !== null ? d.rho.toFixed(4)  : '',
+        d.verdict,
+      ].join(','));
+    });
+  });
+
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'factor_correlation_' + selectedSlot.replace(':','') + '_' + selectedMode + '_thr' + threshold + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  return s.includes(',') || s.includes('"') || s.includes('\n')
+    ? '"' + s.replace(/"/g, '""') + '"'
+    : s;
 }
 </script>
 </body>
