@@ -2906,33 +2906,39 @@ async function runAllScreeners() {
     Object.keys(byTicker).forEach(function (t) {
       liveStocks.push(byTicker[t].stock); keysByTicker[t] = byTicker[t].keys; liveSet[t] = true;
     });
-    // Clear TV's previous-day open before first upsert — Yahoo enrichment sets real value below.
-    // This ensures a failed Yahoo fetch never leaves a stale open in the registry.
+    // Pre-null live opens before first upsert (prevents TV's stale open persisting if Yahoo fails)
     liveStocks.forEach(function(s) { s.open = null; s.gapPct = null; });
     registryUpsertLive(liveStocks, keysByTicker);
-    // Fetch correct session opens from Yahoo (TV scanner returns previous day's open at 09:35)
+    // Refresh stale rows with TV data first (opens corrected below by Yahoo enrichment)
+    var refreshed = await registryRefreshStale(liveSet);
+    // Pre-null opens on stale rows too (defense: TV open is always previous day's open)
+    regTodayRows().forEach(function(row) {
+      if (!liveSet[row.ticker] && row.stock) { row.stock.open = null; row.stock.gapPct = null; }
+    });
+    // Yahoo open enrichment for ALL today's rows (live + stale) — TV always gives previous-day open
     try {
+      var allToday = regTodayRows();
       var openResp = await fetch('/api/opens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tickers: liveStocks.map(function(s) { return s.ticker; }) })
+        body: JSON.stringify({ tickers: allToday.map(function(r) { return r.ticker; }) })
       });
       if (openResp.ok) {
         var opens = await openResp.json();
-        liveStocks.forEach(function(s) {
-          var yOpen = opens[s.ticker];
+        allToday.forEach(function(row) {
+          if (!row.stock) return;
+          var yOpen = opens[row.ticker];
           if (yOpen != null && yOpen > 0) {
-            s.open = yOpen;
-            if (s.prevClose != null && s.prevClose > 0)
-              s.gapPct = (yOpen - s.prevClose) / s.prevClose * 100;
+            row.stock.open = yOpen;
+            if (row.stock.prevClose != null && row.stock.prevClose > 0)
+              row.stock.gapPct = (yOpen - row.stock.prevClose) / row.stock.prevClose * 100;
           }
         });
       }
     } catch (_) {}  // best-effort — scan still works if Yahoo is unreachable
-    // Always validate and save final state (open is Yahoo value or null — never TV's stale value)
-    liveStocks.forEach(function(s) { validateAndCleanStock(s); });
+    // Validate and final upsert for all today's rows
+    regTodayRows().forEach(function(row) { if (row.stock) validateAndCleanStock(row.stock); });
     registryUpsertLive(liveStocks, keysByTicker);
-    var refreshed = await registryRefreshStale(liveSet);
     await saveRegistry();
     var shown = renderScreenerFromRegistry();
     renderRegistryTable();
