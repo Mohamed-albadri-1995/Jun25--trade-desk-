@@ -1111,7 +1111,13 @@ app.post('/api/opens', async (req, res) => {
     try {
       const bars = await fetchYahooIntraday(ticker, Date.now() - 86400000, Date.now(), 1);
       if (!bars || !bars.length) return [ticker, null];
-      const openBar = bars.find(b => b.hhmm >= '09:30');
+      // Filter to today's ET date before searching — prevents yesterday's 09:30 bar
+      // from being returned at pre-market hours (b.time is UTC epoch seconds)
+      const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const todayBars = bars.filter(b =>
+        new Date(b.time * 1000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === todayET
+      );
+      const openBar = todayBars.find(b => b.hhmm >= '09:30');
       return [ticker, openBar ? openBar.open : null];
     } catch (_) { return [ticker, null]; }
   }));
