@@ -1903,6 +1903,8 @@ var MERGED_CSV_HEADERS = [
   'date','slot','captured_at','last_refreshed_at','complete','reason',
   // R1 stock identity
   'ticker','tv_symbol','screeners',
+  // R0 score at first detection
+  'score_at_entry','score_model_ts',
   // R1 price / technicals
   'price','open','change_pct','prev_close','gap_pct','vwap',
   'ema9','ema13','ema20','ema50','sma5',
@@ -2010,10 +2012,11 @@ function renderMergedRegisterView() {
 }
 
 function exportMergedRegisterCsv() {
-  storageGet(['frozenScreener', 'eodOutcome', 'marketSnapshots']).then(function (r) {
+  storageGet(['frozenScreener', 'eodOutcome', 'marketSnapshots', 'registry']).then(function (r) {
     var allR1 = r.frozenScreener || {};
     var allR3 = r.eodOutcome     || {};
     var allR2 = r.marketSnapshots || {};
+    var allR0 = r.registry       || {};
     var dates = Object.keys(allR1).sort();
     if (!dates.length) { setIoStatus('mergedIoStatus', '⚠ No Register 1 data to export'); return; }
     var n = function (v) { return v != null && isFinite(v) ? Number(v).toFixed(4) : ''; };
@@ -2031,12 +2034,15 @@ function exportMergedRegisterCsv() {
         var sec = st.sector || '';
         var sb935 = snap935 && snap935.sectors && snap935.sectors[sec] ? snap935.sectors[sec].bias : '';
         var sb940 = snap940 && snap940.sectors && snap940.sectors[sec] ? snap940.sectors[sec].bias : '';
+        var r0Row = allR0[regId(ticker, date)] || {};
         rows.push({
           date: date, slot: r1Day.slot || '', captured_at: r1Day.capturedAt || '',
           last_refreshed_at: row.lastUpdated ? new Date(row.lastUpdated).toISOString() : '',
           complete: r1Day.complete ? 'true' : 'false', reason: r1Day.reason || '',
           ticker: ticker, tv_symbol: st.tvSymbol || row.tvSymbol || '',
           screeners: (row.screenerKeys || []).join('|'),
+          score_at_entry: r0Row.score_at_entry != null ? r0Row.score_at_entry : '',
+          score_model_ts: r0Row.score_model_ts || '',
           price: n(st.price), open: n(st.open), change_pct: n(st.change),
           prev_close: n(st.prevClose), gap_pct: n(st.gapPct), vwap: n(st.vwap),
           ema9: n(st.ema9), ema13: n(st.ema13), ema20: n(st.ema20), ema50: n(st.ema50), sma5: n(st.sma5),
@@ -2731,7 +2737,12 @@ function buildCard(row) {
     var scMeta  = _scoringModel
       ? (_scoringModel.slot || '') + ' · ' + (_scoringModel.mode || '') + ' · ' + (_scoringModel.threshold || '') + 'R · ' + (_scoringModel.verdictFilter || '')
       : '';
-    scoreBadge = '<span title="Scoring model: ' + esc(scMeta) + '" style="margin-left:auto;font-size:10px;font-weight:700;color:' + scColor + ';border:1px solid ' + scColor + ';border-radius:5px;padding:2px 7px;white-space:nowrap">Score: ' + sc + '</span>';
+    var entryLine = '';
+    if (row.score_at_entry != null && Math.abs(row.score_at_entry - sc) > 5) {
+      var ecColor = row.score_at_entry >= 60 ? '#4ade80' : row.score_at_entry >= 35 ? '#fbbf24' : '#f87171';
+      entryLine = '<br><span style="font-size:9px;color:' + ecColor + ';font-weight:600">Entry: ' + row.score_at_entry + '</span>';
+    }
+    scoreBadge = '<span title="Scoring model: ' + esc(scMeta) + '" style="margin-left:auto;font-size:10px;font-weight:700;color:' + scColor + ';border:1px solid ' + scColor + ';border-radius:5px;padding:2px 7px;white-space:nowrap;text-align:center">Score: ' + sc + entryLine + '</span>';
   } else if (_scoringModel) {
     scoreBadge = '<span style="margin-left:auto;font-size:10px;font-weight:700;color:#475569;border:1px solid #334155;border-radius:5px;padding:2px 7px;white-space:nowrap">Score: —</span>';
   }
@@ -2816,11 +2827,17 @@ function registryUpsertLive(stocks, keysByTicker) {
       row.liveNow = true;
       keys.forEach(function (k) { if (row.screenerKeys.indexOf(k) === -1) row.screenerKeys.push(k); });
     } else {                                // brand-new candidate for today → new row
-      registry[id] = {
+      var newRow = {
         id: id, ticker: s.ticker, date: today, tvSymbol: s.tvSymbol || '',
         firstSeen: now, lastUpdated: now, liveNow: true,
-        screenerKeys: keys.slice(), stock: s, context: ctx, news: null
+        screenerKeys: keys.slice(), stock: s, context: ctx, news: null,
+        score_at_entry: null, score_model_ts: null
       };
+      if (typeof scoreCard === 'function' && _scoringModel) {
+        newRow.score_at_entry = scoreCard(newRow, _scoringModel);
+        newRow.score_model_ts = _scoringModel.savedAt || null;
+      }
+      registry[id] = newRow;
     }
   });
 }
@@ -3509,6 +3526,147 @@ function initScreenerButtons() {
     b.addEventListener('click', function () { runSingle(b.getAttribute('data-scr')); });
   });
 }
+// ── Engine Progress ────────────────────────────────────────────────────────
+function renderEngineProgress() {
+  var statusEl = document.getElementById('epStatus');
+  var calEl    = document.getElementById('epCalibration');
+  var trendEl  = document.getElementById('epTrend');
+  var distEl   = document.getElementById('epDistribution');
+  if (!calEl) return;
+  var outCol = (document.getElementById('epOutcomeCol') || {}).value || 'up_r35';
+  if (statusEl) statusEl.textContent = 'Loading…';
+
+  fetch('/api/merged-register').then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.ok || !d.rows || !d.rows.length) {
+      if (statusEl) statusEl.textContent = '⚠ No merged register data';
+      return;
+    }
+    // Only rows that have a score
+    var scored = d.rows.filter(function (r) { return r.score_at_entry !== '' && r.score_at_entry != null; });
+    if (!scored.length) {
+      if (statusEl) statusEl.textContent = '⚠ No rows with score_at_entry yet — run the screener with a scoring model loaded';
+      calEl.innerHTML = '<div style="color:#fbbf24;font-size:12px">No score data yet. Scores are stamped the first time a card appears with a scoring model loaded.</div>';
+      trendEl.innerHTML = '—'; distEl.innerHTML = '—'; return;
+    }
+    if (statusEl) statusEl.textContent = scored.length + ' scored rows · ' + d.rows.length + ' total';
+
+    // Helper: parse outcome col (may be "1.3000" string or number)
+    function outcome(r) {
+      var v = parseFloat(r[outCol]);
+      return isFinite(v) ? v : null;
+    }
+
+    // ── Panel A: calibration by score bin ─────────────────────────────────
+    var BINS = [[0,20],[20,40],[40,60],[60,80],[80,100]];
+    var binData = BINS.map(function (b) {
+      var rows = scored.filter(function (r) { var s = +r.score_at_entry; return s >= b[0] && s < b[1] + (b[1]===100?1:0); });
+      var withOut = rows.filter(function (r) { return outcome(r) !== null; });
+      var wins = withOut.filter(function (r) { return outcome(r) >= 1; });
+      return { label: b[0] + '–' + b[1], n: rows.length, nOut: withOut.length, wins: wins.length,
+               rate: withOut.length ? wins.length / withOut.length : null };
+    });
+    var totalWithOut = scored.filter(function (r) { return outcome(r) !== null; });
+    var baseline = totalWithOut.length ? totalWithOut.filter(function (r) { return outcome(r) >= 1; }).length / totalWithOut.length : null;
+
+    var calHtml = '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
+      '<tr style="color:#64748b"><th style="text-align:left;padding:4px 6px">Score Range</th><th style="padding:4px 6px">N rows</th><th style="padding:4px 6px">Win rate</th><th style="padding:4px 6px">vs Baseline</th><th style="padding:4px 6px;width:200px">Bar</th></tr>';
+    binData.forEach(function (b) {
+      var rate = b.rate != null ? (b.rate * 100).toFixed(0) + '%' : '—';
+      var diff = (b.rate != null && baseline != null) ? ((b.rate - baseline) * 100).toFixed(0) : null;
+      var diffStr = diff != null ? (diff >= 0 ? '+' + diff : diff) + 'pp' : '—';
+      var diffColor = diff > 0 ? '#4ade80' : diff < 0 ? '#f87171' : '#94a3b8';
+      var barW = b.rate != null ? Math.round(b.rate * 180) : 0;
+      var barColor = b.rate != null ? (b.rate >= 0.6 ? '#4ade80' : b.rate >= 0.35 ? '#fbbf24' : '#f87171') : '#334155';
+      calHtml += '<tr style="border-top:1px solid #1e293b">' +
+        '<td style="padding:5px 6px;color:#e2e8f0;font-weight:600">' + b.label + '</td>' +
+        '<td style="padding:5px 6px;text-align:center;color:#94a3b8">' + b.n + (b.nOut < b.n ? ' <span style="color:#475569">('+b.nOut+' w/out)</span>' : '') + '</td>' +
+        '<td style="padding:5px 6px;text-align:center;color:#e2e8f0">' + rate + '</td>' +
+        '<td style="padding:5px 6px;text-align:center;color:' + diffColor + '">' + diffStr + '</td>' +
+        '<td style="padding:5px 6px"><div style="background:' + barColor + ';height:12px;width:' + barW + 'px;border-radius:3px"></div></td>' +
+        '</tr>';
+    });
+    if (baseline != null) calHtml += '<tr style="border-top:1px solid #334155"><td colspan="5" style="padding:4px 6px;font-size:10px;color:#64748b">Baseline win rate: ' + (baseline * 100).toFixed(0) + '% (all ' + totalWithOut.length + ' rows with outcome)</td></tr>';
+    calHtml += '</table>';
+    calEl.innerHTML = calHtml;
+
+    // ── Panel B: Spearman ρ per model version ─────────────────────────────
+    var byVersion = {};
+    scored.forEach(function (r) {
+      var v = r.score_model_ts || 'unknown';
+      if (!byVersion[v]) byVersion[v] = [];
+      byVersion[v].push(r);
+    });
+    var versions = Object.keys(byVersion).sort();
+
+    function spearman(rows) {
+      var pairs = rows.map(function (r) {
+        return { s: +r.score_at_entry, o: outcome(r) };
+      }).filter(function (p) { return p.o !== null; });
+      if (pairs.length < 3) return null;
+      // rank scores
+      var rankScore = pairs.map(function (p, i) { return { idx: i, val: p.s }; });
+      rankScore.sort(function (a, b) { return a.val - b.val; });
+      rankScore.forEach(function (r, i) { pairs[r.idx].rs = i + 1; });
+      // rank outcomes (ties share midpoint)
+      var wins = pairs.filter(function (p) { return p.o >= 1; }).length;
+      var losses = pairs.length - wins;
+      pairs.forEach(function (p) { p.ro = p.o >= 1 ? losses + wins / 2 : losses / 2; });
+      var n = pairs.length;
+      var meanRS = (n + 1) / 2;
+      var meanRO = pairs.reduce(function (s, p) { return s + p.ro; }, 0) / n;
+      var num = 0, dRS = 0, dRO = 0;
+      pairs.forEach(function (p) { num += (p.rs - meanRS) * (p.ro - meanRO); dRS += (p.rs - meanRS) ** 2; dRO += (p.ro - meanRO) ** 2; });
+      return (dRS * dRO) > 0 ? num / Math.sqrt(dRS * dRO) : 0;
+    }
+
+    if (versions.length === 1 && versions[0] === 'unknown') {
+      trendEl.innerHTML = '<div style="color:#fbbf24;font-size:12px">Only 1 model version found. Save a new model after updating the analysis to see a trend.</div>';
+    } else {
+      var trendHtml = '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
+        '<tr style="color:#64748b"><th style="text-align:left;padding:4px 6px">Model saved at</th><th style="padding:4px 6px">N rows</th><th style="padding:4px 6px">Spearman ρ</th><th style="padding:4px 6px;width:200px">Quality bar</th></tr>';
+      versions.forEach(function (v) {
+        var rows = byVersion[v];
+        var rho = spearman(rows);
+        var rhoStr = rho != null ? rho.toFixed(3) : '—';
+        var rhoColor = rho != null ? (rho >= 0.2 ? '#4ade80' : rho >= 0.05 ? '#fbbf24' : '#f87171') : '#64748b';
+        var barW = rho != null ? Math.max(0, Math.round((rho + 0.5) * 200)) : 0;
+        var label = v === 'unknown' ? '(no timestamp)' : v.replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+        trendHtml += '<tr style="border-top:1px solid #1e293b">' +
+          '<td style="padding:5px 6px;color:#e2e8f0">' + label + '</td>' +
+          '<td style="padding:5px 6px;text-align:center;color:#94a3b8">' + rows.length + '</td>' +
+          '<td style="padding:5px 6px;text-align:center;font-weight:700;color:' + rhoColor + '">' + rhoStr + '</td>' +
+          '<td style="padding:5px 6px"><div style="background:' + rhoColor + ';height:12px;width:' + barW + 'px;border-radius:3px"></div></td>' +
+          '</tr>';
+      });
+      trendHtml += '</table>';
+      trendEl.innerHTML = trendHtml;
+    }
+
+    // ── Panel C: score distribution per version ────────────────────────────
+    var distHtml = '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
+      '<tr style="color:#64748b"><th style="text-align:left;padding:4px 6px">Model Version</th>';
+    BINS.forEach(function (b) { distHtml += '<th style="padding:4px 6px">' + b[0] + '–' + b[1] + '</th>'; });
+    distHtml += '<th style="padding:4px 6px">Total</th></tr>';
+    var BAND_COLORS = ['#f87171','#fb923c','#fbbf24','#4ade80','#22d3ee'];
+    versions.forEach(function (v) {
+      var rows = byVersion[v];
+      var label = v === 'unknown' ? '(no timestamp)' : v.replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+      distHtml += '<tr style="border-top:1px solid #1e293b"><td style="padding:5px 6px;color:#e2e8f0">' + label + '</td>';
+      BINS.forEach(function (b, i) {
+        var cnt = rows.filter(function (r) { var s = +r.score_at_entry; return s >= b[0] && s < b[1] + (b[1]===100?1:0); }).length;
+        var pct = rows.length ? Math.round(cnt / rows.length * 100) : 0;
+        distHtml += '<td style="padding:5px 6px;text-align:center;color:' + BAND_COLORS[i] + '">' + cnt + ' <span style="color:#475569">(' + pct + '%)</span></td>';
+      });
+      distHtml += '<td style="padding:5px 6px;text-align:center;color:#64748b">' + rows.length + '</td></tr>';
+    });
+    distHtml += '</table>';
+    distEl.innerHTML = distHtml;
+
+  }).catch(function (e) {
+    if (statusEl) statusEl.textContent = '⚠ Error: ' + e.message;
+  });
+}
+
 function initTabs() {
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) {
     t.addEventListener('click', function () {
@@ -3530,6 +3688,7 @@ function initTabs() {
       var target = t.getAttribute('data-atab');
       var el = document.getElementById(target);
       if (el) el.classList.add('active');
+      if (target === 'atab-engine') renderEngineProgress();
     });
   });
 }

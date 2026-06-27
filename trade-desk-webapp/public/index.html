@@ -642,6 +642,7 @@
     <div class="analysis-subtabbar">
       <button class="atab active" data-atab="atab-journal">📒 Journal</button>
       <button class="atab" data-atab="atab-factor">📊 Factor Analysis</button>
+      <button class="atab" data-atab="atab-engine">📈 Engine Progress</button>
     </div>
     <div id="atab-journal" class="atab-pane active">
   <div id="pane-journal" class="pane" style="display:block;position:static;overflow:visible">
@@ -769,6 +770,38 @@
     </div><!-- /atab-journal -->
     <div id="atab-factor" class="atab-pane">
       <iframe src="factor-analysis.html" title="Factor Analysis" style="width:100%;height:calc(100vh - 90px);border:none;display:block"></iframe>
+    </div>
+    <div id="atab-engine" class="atab-pane">
+      <div id="engine-progress-root" style="padding:16px;max-width:900px;margin:0 auto">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <h2 style="margin:0;font-size:15px;font-weight:700;color:#93c5fd">📈 Engine Progress</h2>
+          <select id="epOutcomeCol" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:5px;padding:4px 8px;font-size:12px">
+            <option value="up_r35">Outcome: Up R 9:35</option>
+            <option value="up_r40">Outcome: Up R 9:40</option>
+          </select>
+          <button onclick="renderEngineProgress()" style="background:#3b82f6;color:#fff;border:none;border-radius:5px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">Refresh</button>
+          <span id="epStatus" style="font-size:11px;color:#64748b"></span>
+        </div>
+
+        <!-- Panel A: Calibration chart -->
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:14px;margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:10px">Panel A — Score Calibration (all versions)</div>
+          <div id="epCalibration" style="font-size:12px;color:#64748b">Load merged register data in Factor Analysis first, then click Refresh.</div>
+        </div>
+
+        <!-- Panel B: ρ trend over model versions -->
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:14px;margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:10px">Panel B — Rank Correlation (ρ) by Model Version</div>
+          <div style="font-size:10px;color:#64748b;margin-bottom:8px">Higher ρ = scores better predict outcomes. Upward trend = improving model.</div>
+          <div id="epTrend" style="font-size:12px;color:#64748b">—</div>
+        </div>
+
+        <!-- Panel C: Score distribution per version -->
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:14px">
+          <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:10px">Panel C — Score Distribution by Model Version</div>
+          <div id="epDistribution" style="font-size:12px;color:#64748b">—</div>
+        </div>
+      </div>
     </div>
   </div><!-- /pane-analysis -->
 

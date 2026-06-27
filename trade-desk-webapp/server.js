@@ -836,6 +836,7 @@ app.get('/api/merged-register', (req, res) => {
   const allR1 = getAllFrozenScreener();
   const allR3 = getAllEodOutcome();
   const allR2 = getAllMarketSnapshots();
+  const allR0 = getRegistry();
   const n = v => (v != null && isFinite(v)) ? Number(v).toFixed(4) : '';
   const catalystLabel = row => (row && row.catalyst && row.catalyst.label) ? row.catalyst.label : '';
   const rows = [];
@@ -849,6 +850,7 @@ app.get('/api/merged-register', (req, res) => {
     Object.keys(r1Day.rows).sort().forEach(ticker => {
       const row = r1Day.rows[ticker], st = row.stock || {}, ctx = row.context || {};
       const e3  = (r3Day.rows && r3Day.rows[ticker]) || {};
+      const r0Row = allR0[ticker + '|' + date] || {};
       const sec = st.sector || '';
       const sb935 = snap935 && snap935.sectors && snap935.sectors[sec] ? snap935.sectors[sec].bias : '';
       const sb940 = snap940 && snap940.sectors && snap940.sectors[sec] ? snap940.sectors[sec].bias : '';
@@ -858,6 +860,8 @@ app.get('/api/merged-register', (req, res) => {
         complete: r1Day.complete ? 'true' : 'false', reason: r1Day.reason || '',
         ticker, tv_symbol: st.tvSymbol || row.tvSymbol || '',
         screeners: (row.screenerKeys || []).join('|'),
+        score_at_entry: r0Row.score_at_entry != null ? r0Row.score_at_entry : '',
+        score_model_ts: r0Row.score_model_ts || '',
         price: n(st.price), open: n(st.open), change_pct: n(st.change),
         prev_close: n(st.prevClose), gap_pct: n(st.gapPct), vwap: n(st.vwap),
         ema9: n(st.ema9), ema13: n(st.ema13), ema20: n(st.ema20), ema50: n(st.ema50), sma5: n(st.sma5),
