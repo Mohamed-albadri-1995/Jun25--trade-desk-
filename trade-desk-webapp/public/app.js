@@ -2906,7 +2906,9 @@ async function runAllScreeners() {
     Object.keys(byTicker).forEach(function (t) {
       liveStocks.push(byTicker[t].stock); keysByTicker[t] = byTicker[t].keys; liveSet[t] = true;
     });
-    // registry-first: record live now → enrich opens from Yahoo → refresh stale → render
+    // Clear TV's previous-day open before first upsert — Yahoo enrichment sets real value below.
+    // This ensures a failed Yahoo fetch never leaves a stale open in the registry.
+    liveStocks.forEach(function(s) { s.open = null; s.gapPct = null; });
     registryUpsertLive(liveStocks, keysByTicker);
     // Fetch correct session opens from Yahoo (TV scanner returns previous day's open at 09:35)
     try {
@@ -2923,16 +2925,13 @@ async function runAllScreeners() {
             s.open = yOpen;
             if (s.prevClose != null && s.prevClose > 0)
               s.gapPct = (yOpen - s.prevClose) / s.prevClose * 100;
-          } else {
-            // null = before 09:30 ET or Yahoo error — show nothing rather than wrong value
-            s.open = null;
-            s.gapPct = null;
           }
-          validateAndCleanStock(s);
         });
-        registryUpsertLive(liveStocks, keysByTicker);
       }
     } catch (_) {}  // best-effort — scan still works if Yahoo is unreachable
+    // Always validate and save final state (open is Yahoo value or null — never TV's stale value)
+    liveStocks.forEach(function(s) { validateAndCleanStock(s); });
+    registryUpsertLive(liveStocks, keysByTicker);
     var refreshed = await registryRefreshStale(liveSet);
     await saveRegistry();
     var shown = renderScreenerFromRegistry();
