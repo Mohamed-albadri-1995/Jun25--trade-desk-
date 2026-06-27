@@ -5,6 +5,7 @@ const cors    = require('cors');
 const cron    = require('node-cron');
 const path    = require('path');
 const Database = require('better-sqlite3');
+const { scoreCard } = require('./public/scoring-brackets');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'trade-desk.db');
@@ -739,6 +740,41 @@ async function freezeScreener(slot) {
     const complete = Object.keys(rows).every(t => rows[t].stock && rows[t].stock.price != null);
     saveFrozenScreener(date, { slot, capturedAt: etTimeStr(), ts: Date.now(), rows, complete, reason: complete ? '' : 'Some rows incomplete' });
     console.log(`[${etTimeStr()}] R1 frozen: ${date} ${slot} — ${Object.keys(rows).length} stocks, complete=${complete}`);
+
+    // ── Upsert registry + stamp score_at_entry for new rows ──────────
+    let modelObj = null;
+    try { const m = getSetting('scoring_model', ''); if (m) modelObj = JSON.parse(m); } catch (_) {}
+    const now = Date.now();
+    const existing = getRegistry();
+    let scored = 0;
+    Object.keys(rows).forEach(ticker => {
+      const key = ticker + '|' + date;
+      const r1  = rows[ticker];
+      const prev = existing[key];
+      const regRow = prev ? Object.assign({}, prev, {
+        lastUpdated: now, liveNow: true,
+        screenerKeys: r1.screenerKeys,
+        stock: r1.stock,
+        context: r1.context || prev.context || {}
+      }) : {
+        ticker, date, firstSeen: now, lastUpdated: now, liveNow: true,
+        screenerKeys: r1.screenerKeys,
+        stock: r1.stock,
+        context: r1.context || {},
+        score_at_entry: null, score_model_ts: null
+      };
+      // Stamp score only on first detection (never overwrite)
+      if (regRow.score_at_entry == null && modelObj) {
+        const s = scoreCard(regRow, modelObj);
+        if (s !== null) {
+          regRow.score_at_entry  = s;
+          regRow.score_model_ts  = modelObj.savedAt || null;
+          scored++;
+        }
+      }
+      upsertRegistryRow(ticker, date, regRow);
+    });
+    console.log(`[${etTimeStr()}] Registry updated: ${Object.keys(rows).length} rows, ${scored} newly scored`);
   } catch (err) {
     console.error(`[${etTimeStr()}] R1 freeze failed: ${err.message}`);
   }

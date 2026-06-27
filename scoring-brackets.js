@@ -409,3 +409,8 @@ function scoreCard(row, model) {
   var score = Math.round((raw + 2) / 4 * 100); // normalise to 0–100
   return Math.max(0, Math.min(100, score));
 }
+
+// Support Node.js require() alongside browser global usage
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { SCORE_FACTORS: SCORE_FACTORS, scoreFactor: scoreFactor, scoreCard: scoreCard };
+}
