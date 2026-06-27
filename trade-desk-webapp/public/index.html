@@ -570,6 +570,63 @@
       <div id="dataAuditView"></div>
     </div>
 
+    <!-- ── Register 4: Journal Fills ── -->
+    <div class="section">
+      <div class="section-hdr">📒 Register 4 — Journal Fills</div>
+      <div class="reg-note">Import broker fills to populate the Trade Journal. Tag the account, then pick a CSV or paste it below. Fees and chart API keys are configured here too.</div>
+
+      <details id="jnl-import-details" open>
+        <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:6px 0">Import Fills</summary>
+        <div style="margin-top:8px">
+          <div style="font-size:12px;color:#64748b;margin-bottom:6px">Import from <strong style="color:#94a3b8">TradingView</strong> (Trade Log → Export) or <strong style="color:#94a3b8">Trade the Pool / DXtrade</strong> (orders history). Tag the account, then pick the CSV file — or paste it below.</div>
+          <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center;flex-wrap:wrap">
+            <input id="jnl-account-label" placeholder="Account / broker (required)" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:6px 8px;flex:1;min-width:150px;box-sizing:border-box">
+            <label class="btn" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;font-size:12px;cursor:pointer;padding:6px 12px;border-radius:6px;white-space:nowrap">📁 Choose CSV file<input type="file" id="jnl-file-input" accept=".csv,.txt" style="display:none"></label>
+          </div>
+          <textarea id="jnl-csv-input" placeholder="…or paste CSV here" style="width:100%;height:80px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:11px;font-family:monospace;padding:8px;resize:vertical;box-sizing:border-box"></textarea>
+          <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+            <button id="jnl-import-btn" class="btn" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;font-size:12px">⬆ Import pasted</button>
+            <button id="jnl-clear-btn" class="btn" style="background:#1e1e2e;color:#64748b;border:1px solid #334155;font-size:12px;margin-left:auto">🗑 Clear all</button>
+          </div>
+          <div id="jnl-import-msg" style="font-size:11px;margin-top:6px;min-height:16px"></div>
+        </div>
+      </details>
+
+      <details id="jnl-fees-details">
+        <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:6px 0">💸 Fees &amp; Commissions</summary>
+        <div style="margin-top:8px">
+          <div style="font-size:12px;color:#64748b;margin-bottom:6px">Define the standard fee model for each account. New imports use it automatically; <strong style="color:#94a3b8">♻ Recalculate</strong> re-applies it to everything already imported.</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+            <select id="jnl-fee-account" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:5px 8px">
+              <option value="*">* All accounts (default)</option>
+            </select>
+            <select id="jnl-fee-mode" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:5px 8px">
+              <option value="replace">Use profile (ignore CSV commissions)</option>
+              <option value="add">Add on top of CSV commissions</option>
+            </select>
+          </div>
+          <div id="jnl-fee-rules"></div>
+          <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
+            <button id="jnl-fee-add-rule" class="btn" style="background:#1e1e2e;color:#94a3b8;border:1px solid #334155;font-size:12px">+ Add fee rule</button>
+            <button id="jnl-fee-save" class="btn" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;font-size:12px">💾 Save profile</button>
+            <button id="jnl-fee-recalc" class="btn" style="background:#14532d;color:#86efac;border:1px solid #166534;font-size:12px">♻ Recalculate all trades</button>
+          </div>
+          <div id="jnl-fee-msg" style="font-size:11px;margin-top:6px;min-height:16px"></div>
+        </div>
+      </details>
+
+      <details id="jnl-keys-details">
+        <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:6px 0">📈 Chart data (optional)</summary>
+        <div style="margin-top:8px">
+          <div style="font-size:12px;color:#64748b;margin-bottom:6px">Per-trade charts use Yahoo Finance (no key, last ~7 days). For older trades, add a free <strong style="color:#94a3b8">Finnhub</strong> key (≈1 month) or a <strong style="color:#94a3b8">Polygon</strong> key.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="jnl-finnhub-key" placeholder="Finnhub API key (optional)" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:6px 8px;flex:1;min-width:150px;box-sizing:border-box">
+            <input id="jnl-polygon-key" placeholder="Polygon API key (optional)" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:6px 8px;flex:1;min-width:150px;box-sizing:border-box">
+          </div>
+        </div>
+      </details>
+    </div>
+
   </div>
 
   <!-- ════════════════════ SHORTLIST ════════════════════ -->
@@ -657,57 +714,6 @@
           </div>
 
           <div id="jnl-tab-trades" class="jnl-tab-panel">
-
-            <details id="jnl-import-details" open>
-              <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:6px 0">Import Fills</summary>
-              <div style="margin-top:8px">
-                <div style="font-size:12px;color:#64748b;margin-bottom:6px">Import from <strong style="color:#94a3b8">TradingView</strong> (Trade Log → Export) or <strong style="color:#94a3b8">Trade the Pool / DXtrade</strong> (orders history). Tag the account, then pick the CSV file — or paste it below.</div>
-                <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center;flex-wrap:wrap">
-                  <input id="jnl-account-label" placeholder="Account / broker (required)" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:6px 8px;flex:1;min-width:150px;box-sizing:border-box">
-                  <label class="btn" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;font-size:12px;cursor:pointer;padding:6px 12px;border-radius:6px;white-space:nowrap">📁 Choose CSV file<input type="file" id="jnl-file-input" accept=".csv,.txt" style="display:none"></label>
-                </div>
-                <textarea id="jnl-csv-input" placeholder="…or paste CSV here" style="width:100%;height:80px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:11px;font-family:monospace;padding:8px;resize:vertical;box-sizing:border-box"></textarea>
-                <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
-                  <button id="jnl-import-btn" class="btn" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;font-size:12px">⬆ Import pasted</button>
-                  <button id="jnl-clear-btn" class="btn" style="background:#1e1e2e;color:#64748b;border:1px solid #334155;font-size:12px;margin-left:auto">🗑 Clear all</button>
-                </div>
-                <div id="jnl-import-msg" style="font-size:11px;margin-top:6px;min-height:16px"></div>
-              </div>
-            </details>
-
-            <details id="jnl-fees-details">
-              <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:6px 0">💸 Fees &amp; Commissions</summary>
-              <div style="margin-top:8px">
-                <div style="font-size:12px;color:#64748b;margin-bottom:6px">Define the standard fee model for each account. New imports use it automatically; <strong style="color:#94a3b8">♻ Recalculate</strong> re-applies it to everything already imported.</div>
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-                  <select id="jnl-fee-account" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:5px 8px">
-                    <option value="*">* All accounts (default)</option>
-                  </select>
-                  <select id="jnl-fee-mode" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:5px 8px">
-                    <option value="replace">Use profile (ignore CSV commissions)</option>
-                    <option value="add">Add on top of CSV commissions</option>
-                  </select>
-                </div>
-                <div id="jnl-fee-rules"></div>
-                <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
-                  <button id="jnl-fee-add-rule" class="btn" style="background:#1e1e2e;color:#94a3b8;border:1px solid #334155;font-size:12px">+ Add fee rule</button>
-                  <button id="jnl-fee-save" class="btn" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;font-size:12px">💾 Save profile</button>
-                  <button id="jnl-fee-recalc" class="btn" style="background:#14532d;color:#86efac;border:1px solid #166534;font-size:12px">♻ Recalculate all trades</button>
-                </div>
-                <div id="jnl-fee-msg" style="font-size:11px;margin-top:6px;min-height:16px"></div>
-              </div>
-            </details>
-
-            <details id="jnl-keys-details">
-              <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:6px 0">📈 Chart data (optional)</summary>
-              <div style="margin-top:8px">
-                <div style="font-size:12px;color:#64748b;margin-bottom:6px">Per-trade charts use Yahoo Finance (no key, last ~7 days). For older trades, add a free <strong style="color:#94a3b8">Finnhub</strong> key (≈1 month) or a <strong style="color:#94a3b8">Polygon</strong> key.</div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <input id="jnl-finnhub-key" placeholder="Finnhub API key (optional)" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:6px 8px;flex:1;min-width:150px;box-sizing:border-box">
-                  <input id="jnl-polygon-key" placeholder="Polygon API key (optional)" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:6px 8px;flex:1;min-width:150px;box-sizing:border-box">
-                </div>
-              </div>
-            </details>
 
             <div id="jnl-filter-row" style="margin:8px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               <input id="jnl-filter-ticker" placeholder="Filter ticker…" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:4px 8px;width:100px">
