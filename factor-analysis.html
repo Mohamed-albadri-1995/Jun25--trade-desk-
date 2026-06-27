@@ -1,0 +1,1593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trade Desk — Factor Analysis</title>
+<style>
+:root{
+  --bg:#0b1120;--panel:#111827;--panel2:#0f172a;--inset:#0c1422;
+  --border:#1e293b;--border2:#334155;
+  --txt:#e2e8f0;--txt2:#cbd5e1;--muted:#94a3b8;--muted2:#64748b;
+  --teal:#5eead4;--teal2:rgba(94,234,212,.12);
+  --green:#4ade80;--green-b:#22c55e;--green-dim:rgba(34,197,94,.10);
+  --red:#f87171;--red-b:#ef4444;--red-dim:rgba(239,68,68,.10);
+  --amber:#fbbf24;--amber-dim:rgba(251,191,36,.10);
+  --blue:#60a5fa;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--txt);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
+body{padding:0 0 60px}
+
+/* ── header ── */
+.hdr{background:var(--panel2);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.hdr-title{font-size:17px;font-weight:800;color:var(--txt)}
+.hdr-sub{font-size:11px;color:var(--muted)}
+
+/* ── upload zone ── */
+.upload-zone{border:2px dashed var(--border2);border-radius:12px;padding:36px 24px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;margin:20px}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--teal);background:var(--teal2)}
+.upload-zone p{color:var(--muted);font-size:13px;margin-top:8px}
+.upload-zone strong{color:var(--txt2)}
+#fileInput{display:none}
+
+/* ── controls ── */
+.controls{padding:14px 20px;background:var(--panel2);border-bottom:1px solid var(--border);display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
+.ctrl-group{display:flex;flex-direction:column;gap:5px}
+.ctrl-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.btn-group{display:flex;gap:3px}
+.btn-tog{padding:6px 13px;border-radius:6px;border:1px solid var(--border2);background:var(--inset);color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;transition:all .1s}
+.btn-tog:hover{filter:brightness(1.2)}
+.btn-tog.on{background:rgba(94,234,212,.14);color:var(--teal);border-color:var(--teal)}
+.chk-list{display:flex;gap:6px;flex-wrap:wrap}
+.chk-item{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;border:1px solid var(--border2);background:var(--inset);cursor:pointer;font-size:11px;color:var(--muted2)}
+.chk-item input{accent-color:var(--teal);cursor:pointer}
+.chk-item.on{color:var(--txt2);border-color:var(--border2)}
+.ctrl-sep{width:1px;background:var(--border);align-self:stretch}
+.run-btn{padding:10px 22px;border-radius:8px;border:none;background:linear-gradient(90deg,#0ea5e9,var(--green-b));color:#04121f;font-weight:800;font-size:13px;cursor:pointer;align-self:center;margin-left:auto}
+.run-btn:hover{filter:brightness(1.1)}
+.run-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── noise / output controls ── */
+.output-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.noise-input{background:var(--inset);border:1px solid var(--border2);border-radius:5px;color:var(--txt);font-size:12px;padding:5px 8px;width:55px}
+
+/* ── summary strip ── */
+.summary{padding:10px 20px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted)}
+.sum-val{font-size:14px;font-weight:800;color:var(--txt)}
+.sum-lbl{font-size:10px;color:var(--muted)}
+.sum-block{display:flex;flex-direction:column;gap:1px}
+.sum-arrow{color:var(--border2);font-size:16px}
+
+/* ── main content ── */
+#content{padding:16px 20px}
+
+/* ── factor section ── */
+.fsec{margin-bottom:14px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.fsec-hdr{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--panel);cursor:pointer;user-select:none}
+.fsec-hdr:hover{filter:brightness(1.08)}
+.fsec-title{font-size:12px;font-weight:800;color:var(--teal);text-transform:uppercase;letter-spacing:.5px}
+.fsec-count{font-size:10px;color:var(--muted)}
+.fsec-chev{margin-left:auto;font-size:11px;color:var(--muted);transition:transform .15s}
+.fsec.open .fsec-chev{transform:rotate(180deg)}
+.fsec-body{display:none;padding:10px 14px 14px}
+.fsec.open .fsec-body{display:block}
+
+/* ── factor table ── */
+.ftbl-wrap{overflow-x:auto}
+table.ftbl{border-collapse:collapse;width:100%;font-size:11px;white-space:nowrap}
+table.ftbl th{padding:5px 9px;background:var(--inset);color:var(--muted);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border2);text-align:center}
+table.ftbl th:first-child{text-align:left}
+table.ftbl td{padding:5px 9px;border-bottom:1px solid rgba(148,163,184,.07);text-align:center;font-variant-numeric:tabular-nums}
+table.ftbl td:first-child{text-align:left;font-weight:700;color:var(--txt2);max-width:200px;overflow:hidden;text-overflow:ellipsis}
+table.ftbl tr:last-child td{border-bottom:none}
+table.ftbl tr:hover td{background:rgba(148,163,184,.05)}
+.n-col{color:var(--txt);font-weight:700}
+.pct-col{color:var(--muted2);font-size:10px}
+.cell-dual{display:flex;flex-direction:column;align-items:center;gap:1px}
+.cell-n{font-weight:700}
+.cell-pct{font-size:9px;color:var(--muted2)}
+.avg-col{color:var(--amber);font-weight:700}
+
+/* heat colors applied via JS */
+.h0{background:rgba(239,68,68,.18)!important}
+.h1{background:rgba(239,68,68,.08)!important}
+.h2{background:rgba(148,163,184,.04)!important}
+.h3{background:rgba(34,197,94,.08)!important}
+.h4{background:rgba(34,197,94,.18)!important}
+
+/* ── data preview table ── */
+.preview-wrap{margin:0 0 0;border-bottom:1px solid var(--border)}
+.preview-toggle{display:flex;align-items:center;gap:10px;padding:9px 20px;background:var(--panel2);cursor:pointer;user-select:none;border-bottom:1px solid var(--border)}
+.preview-toggle:hover{filter:brightness(1.08)}
+.preview-toggle-title{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.preview-toggle-meta{font-size:11px;color:var(--muted2)}
+.preview-toggle-chev{margin-left:auto;font-size:11px;color:var(--muted);transition:transform .15s}
+.preview-wrap.open .preview-toggle-chev{transform:rotate(180deg)}
+.preview-body{display:none;overflow-x:auto;max-height:420px;overflow-y:auto}
+.preview-wrap.open .preview-body{display:block}
+table.ptbl{border-collapse:collapse;font-size:10px;white-space:nowrap;width:100%}
+table.ptbl th{padding:5px 8px;background:var(--inset);border-bottom:2px solid var(--border2);border-right:1px solid var(--border);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0;z-index:2}
+table.ptbl td{padding:4px 8px;border-bottom:1px solid rgba(148,163,184,.06);border-right:1px solid rgba(148,163,184,.04);font-variant-numeric:tabular-nums}
+/* column group header colors */
+.th-id{color:var(--muted)}
+.th-35{color:#f59e0b}
+.th-40{color:#818cf8}
+.th-snap35{color:#fb923c}
+.th-snap40{color:#a78bfa}
+.th-out{color:var(--green);background:rgba(34,197,94,.06)!important}
+/* dimmed column group when inactive */
+table.ptbl th.dim,table.ptbl td.dim{opacity:.22}
+/* output column always highlighted */
+table.ptbl td.td-out{background:rgba(34,197,94,.07);color:var(--green);font-weight:700}
+/* row status */
+.ptbl tr.row-final td{background:rgba(94,234,212,.04)}
+.ptbl tr.row-final td:first-child{border-left:3px solid var(--teal)}
+.ptbl tr.row-noise td{background:rgba(251,191,36,.04);opacity:.55}
+.ptbl tr.row-noise td:first-child{border-left:3px solid var(--amber)}
+.ptbl tr.row-regime td{background:rgba(239,68,68,.04);opacity:.45}
+.ptbl tr.row-regime td:first-child{border-left:3px solid var(--red)}
+.ptbl tr.row-missing td{opacity:.25}
+.ptbl tr.row-missing td:first-child{border-left:3px solid var(--border2)}
+/* status badge */
+.st-badge{display:inline-block;padding:1px 5px;border-radius:4px;font-size:8px;font-weight:800;letter-spacing:.3px;white-space:nowrap}
+.st-final{background:rgba(94,234,212,.15);color:var(--teal)}
+.st-noise{background:rgba(251,191,36,.15);color:var(--amber)}
+.st-regime{background:rgba(239,68,68,.15);color:var(--red)}
+.st-missing{background:rgba(148,163,184,.1);color:var(--muted2)}
+/* group separator */
+table.ptbl th.grp-sep,table.ptbl td.grp-sep{border-left:2px solid var(--border2)}
+
+/* ── empty / status ── */
+.empty-msg{color:var(--muted2);text-align:center;padding:40px 20px;font-size:13px}
+.err{color:var(--red);background:var(--red-dim);border:1px solid var(--red-b);border-radius:6px;padding:8px 12px;font-size:12px;margin:12px 20px}
+.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:700}
+.badge-bull{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.35)}
+.badge-bear{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.35)}
+.badge-neu{background:rgba(148,163,184,.12);color:var(--muted);border:1px solid var(--border2)}
+.badge-hot{background:rgba(251,146,60,.15);color:#fb923c;border:1px solid rgba(251,146,60,.4)}
+
+/* ── correlation section ── */
+.corr-hdr{display:flex;align-items:center;gap:14px;padding:20px 0 12px;flex-wrap:wrap}
+.corr-title{font-size:15px;font-weight:800;color:var(--teal)}
+.corr-baseline{font-size:11px;color:var(--muted2);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:5px 12px}
+.corr-baseline strong{color:var(--txt)}
+.export-row{display:flex;gap:8px;margin-left:auto}
+.exp-btn{padding:7px 16px;border-radius:7px;border:1px solid var(--border2);background:var(--inset);color:var(--muted);font-size:11px;font-weight:700;cursor:pointer}
+.exp-btn:hover{filter:brightness(1.3)}
+
+/* info box */
+.info-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;overflow:hidden}
+.info-box-hdr{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;user-select:none}
+.info-box-hdr:hover{filter:brightness(1.1)}
+.info-box-title{font-size:11px;font-weight:800;color:var(--blue)}
+.info-box-body{display:none;padding:0 14px 14px;font-size:11px;color:var(--muted2);line-height:1.7}
+.info-box.open .info-box-body{display:block}
+.info-box-body dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin-top:8px}
+.info-box-body dt{font-weight:700;color:var(--txt2);white-space:nowrap}
+.info-box-body dd{margin:0}
+.info-box-body .rule-row{margin-top:8px;display:flex;gap:20px;flex-wrap:wrap}
+.info-box-body .rule-chip{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700}
+
+/* correlation table */
+.corr-tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:6px}
+table.ctbl{border-collapse:collapse;width:100%;font-size:11px;white-space:nowrap}
+table.ctbl th{padding:7px 10px;background:var(--inset);color:var(--muted);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border2);text-align:center}
+table.ctbl th:first-child{text-align:left}
+table.ctbl td{padding:6px 10px;border-bottom:1px solid rgba(148,163,184,.07);text-align:center;font-variant-numeric:tabular-nums}
+table.ctbl td:first-child{text-align:left;font-weight:700;color:var(--txt2);cursor:pointer}
+table.ctbl td:first-child:hover{color:var(--teal)}
+table.ctbl tr:last-child td{border-bottom:none}
+table.ctbl tr:hover td{background:rgba(148,163,184,.04)}
+/* verdict chips */
+.v-strong{color:#4ade80;font-weight:800}
+.v-moderate{color:var(--amber);font-weight:700}
+.v-weak{color:var(--muted);font-weight:600}
+.v-noise{color:var(--muted2)}
+/* stat value coloring */
+.stat-hi{color:var(--green);font-weight:700}
+.stat-mid{color:var(--amber);font-weight:700}
+.stat-lo{color:var(--muted2)}
+.stat-neg{color:var(--red);font-weight:700}
+/* bracket detail panel */
+.bracket-detail{display:none;background:var(--inset);border-top:1px solid var(--border2);padding:10px 14px}
+.bracket-detail.open{display:block}
+table.btbl{border-collapse:collapse;width:100%;font-size:10px}
+table.btbl th{padding:4px 8px;color:var(--muted2);font-size:9px;font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);text-align:center}
+table.btbl th:first-child{text-align:left}
+table.btbl td{padding:4px 8px;border-bottom:1px solid rgba(148,163,184,.05);text-align:center;font-variant-numeric:tabular-nums}
+table.btbl td:first-child{text-align:left;color:var(--txt2)}
+.woe-pos{color:var(--green)}
+.woe-neg{color:var(--red)}
+/* print */
+@media print{
+  .hdr,.controls,.upload-zone,.summary,.colStrip,.preview-wrap,.corr-hdr .export-row,
+  #errBar,.fsec,#content{display:none!important}
+  #correlationSection{display:block!important;padding:0}
+  .corr-hdr .export-row{display:none!important}
+  body{background:#fff;color:#000}
+  .corr-title{color:#0f4c75}
+  .info-box-body dt{color:#333}
+  .corr-tbl-wrap{border:1px solid #ccc}
+  table.ctbl th{background:#f0f0f0;color:#333}
+  .bracket-detail{display:block!important}
+}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <span class="hdr-title">📊 Factor Analysis Dashboard</span>
+  <span class="hdr-sub">Trade Desk — Merged Register</span>
+</div>
+
+<!-- Upload zone (shown until file loaded) -->
+<div id="uploadZone" class="upload-zone">
+  <div style="font-size:28px">📂</div>
+  <strong>Load merged register data</strong>
+  <p style="margin-bottom:12px">Drop a merged register CSV here, click to browse, or load directly from the extension registry.</p>
+  <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap" onclick="event.stopPropagation()">
+    <button onclick="document.getElementById('fileInput').click()"
+      style="padding:9px 18px;border-radius:7px;border:1px solid var(--border2);background:var(--inset);color:var(--txt2);font-size:12px;font-weight:700;cursor:pointer">
+      📁 Browse CSV file
+    </button>
+    <button id="regLoadBtn" onclick="loadFromRegistry()"
+      style="padding:9px 18px;border-radius:7px;border:1px solid rgba(94,234,212,.4);background:rgba(94,234,212,.08);color:var(--teal);font-size:12px;font-weight:700;cursor:pointer;display:none">
+      🔗 Load from Extension Registry
+    </button>
+  </div>
+  <p id="regLoadNote" style="font-size:10px;color:var(--muted2);margin-top:8px;display:none">
+    Loads all registry records from the extension's storage — no file needed.<br>
+    <em>Note: outcome columns (entry35/up_r35 etc.) require a merged CSV with EOD data.</em>
+  </p>
+  <input type="file" id="fileInput" accept=".csv">
+</div>
+
+<!-- Controls (hidden until file loaded) -->
+<div id="controlsBar" class="controls" style="display:none">
+
+  <div class="ctrl-group">
+    <div class="ctrl-label">Entry Slot</div>
+    <div class="btn-group">
+      <button class="btn-tog on" data-slot="09:35">9:35</button>
+      <button class="btn-tog" data-slot="09:40">9:40</button>
+    </div>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="ctrl-group">
+    <div class="ctrl-label">Output Mode</div>
+    <div class="btn-group">
+      <button class="btn-tog on" data-mode="up">↑ Up R (H−E/ATR)</button>
+      <button class="btn-tog" data-mode="down">↓ Down R (E−L/ATR)</button>
+      <button class="btn-tog" data-mode="max">⬆⬇ Max R</button>
+    </div>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="ctrl-group">
+    <div class="ctrl-label">Noise Cut — keep top &amp; bottom</div>
+    <div class="output-row">
+      <input type="number" class="noise-input" id="noisePct" value="30" min="5" max="49" step="1"> %
+      <span style="font-size:11px;color:var(--muted)">(drops middle <span id="noiseMiddle">40</span>%)</span>
+    </div>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="ctrl-group">
+    <div class="ctrl-label">Success Threshold (R)</div>
+    <div class="output-row">
+      <input type="number" class="noise-input" id="successThreshold" value="1.3" min="0.1" max="10" step="0.1" style="width:65px"> R
+      <span style="font-size:11px;color:var(--muted)">output ≥ this = success</span>
+    </div>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="ctrl-group">
+    <div class="ctrl-label">Regime Filter</div>
+    <div class="chk-list" id="regimeChecks"></div>
+  </div>
+
+  <button class="run-btn" id="runBtn" disabled>▶ Analyze</button>
+</div>
+
+<!-- Summary strip -->
+<div id="summaryBar" class="summary" style="display:none">
+  <div class="sum-block"><div class="sum-val" id="sTotal">—</div><div class="sum-lbl">Total rows</div></div>
+  <div class="sum-arrow">→</div>
+  <div class="sum-block"><div class="sum-val" id="sSlot">—</div><div class="sum-lbl">Rows with valid output</div></div>
+  <div class="sum-arrow">→</div>
+  <div class="sum-block"><div class="sum-val" id="sRegime">—</div><div class="sum-lbl">After regime filter</div></div>
+  <div class="sum-arrow">→</div>
+  <div class="sum-block"><div class="sum-val" id="sOutput">—</div><div class="sum-lbl">Output computed</div></div>
+  <div class="sum-arrow">→</div>
+  <div class="sum-block" style="background:rgba(94,234,212,.07);padding:4px 10px;border-radius:7px;border:1px solid rgba(94,234,212,.2)">
+    <div class="sum-val" style="color:var(--teal)" id="sFinal">—</div>
+    <div class="sum-lbl">After noise cut</div>
+  </div>
+  <div style="margin-left:auto;font-size:10px;color:var(--muted2)" id="sOutputMode"></div>
+</div>
+
+<!-- Active columns confirmation strip -->
+<div id="colStrip" style="display:none;padding:7px 20px;background:#0a1628;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);gap:18px;flex-wrap:wrap;align-items:center">
+  <span style="font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;font-size:9px">Active columns →</span>
+  <span>Slot filter: <strong id="colSlot" style="color:var(--teal)">—</strong></span>
+  <span>Entry: <code id="colEntry" style="color:var(--amber);background:rgba(251,191,36,.08);padding:1px 5px;border-radius:3px">—</code></span>
+  <span>High: <code id="colHH" style="color:var(--amber);background:rgba(251,191,36,.08);padding:1px 5px;border-radius:3px">—</code></span>
+  <span>Low: <code id="colLL" style="color:var(--amber);background:rgba(251,191,36,.08);padding:1px 5px;border-radius:3px">—</code></span>
+  <span>Output: <code id="colOut" style="color:var(--green);background:rgba(34,197,94,.08);padding:1px 5px;border-radius:3px">—</code></span>
+  <span>Regime/context from: <code id="colSnap" style="color:var(--blue);background:rgba(96,165,250,.08);padding:1px 5px;border-radius:3px">—</code></span>
+</div>
+
+<!-- Data preview / debug table -->
+<div class="preview-wrap" id="previewWrap" style="display:none">
+  <div class="preview-toggle" onclick="document.getElementById('previewWrap').classList.toggle('open')">
+    <span class="preview-toggle-title">🔬 Data Preview — Debug Table</span>
+    <span class="preview-toggle-meta" id="previewMeta"></span>
+    <span class="preview-toggle-chev">▾</span>
+  </div>
+  <div class="preview-body" id="previewBody"></div>
+</div>
+
+<div id="errBar"></div>
+<div id="content"><div class="empty-msg">Load a merged register CSV to begin analysis.</div></div>
+<div id="correlationSection" style="display:none;padding:0 20px 60px"></div>
+
+<script>
+'use strict';
+
+// ══════════════════════════════════════════════════════════════════
+// CSV PARSER
+// ══════════════════════════════════════════════════════════════════
+function parseCSV(text) {
+  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+  if (!lines.length) return [];
+  const headers = splitCSVLine(lines[0]);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const vals = splitCSVLine(line);
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h.trim()] = vals[idx] !== undefined ? vals[idx].trim() : ''; });
+    rows.push(obj);
+  }
+  return rows;
+}
+function splitCSVLine(line) {
+  const result = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (c === ',' && !inQ) {
+      result.push(cur); cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════
+let allRows = [];
+let selectedSlot = '09:35';
+let selectedMode = 'up';
+let selectedRegimes = new Set();
+let availableRegimes = [];
+
+// ══════════════════════════════════════════════════════════════════
+// FILE LOADING
+// ══════════════════════════════════════════════════════════════════
+const uploadZone = document.getElementById('uploadZone');
+const fileInput  = document.getElementById('fileInput');
+
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) readFile(f);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) readFile(fileInput.files[0]); });
+
+function readFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => loadData(e.target.result);
+  reader.readAsText(file);
+}
+
+function loadData(text) {
+  try {
+    allRows = parseCSV(text);
+    if (!allRows.length) { showErr('CSV appears empty.'); return; }
+    clearErr();
+
+    document.getElementById('uploadZone').style.display = 'none';
+    document.getElementById('controlsBar').style.display = 'flex';
+    document.getElementById('summaryBar').style.display = 'flex';
+    document.getElementById('runBtn').disabled = false;
+
+    buildRegimeChecks(); // builds from currently selected slot
+    runAnalysis();
+  } catch(e) {
+    showErr('Failed to parse CSV: ' + e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CONTROLS WIRING
+// ══════════════════════════════════════════════════════════════════
+document.querySelectorAll('[data-slot]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-slot]').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    selectedSlot = btn.dataset.slot;
+    // Regime options come from the snapshot columns that match the chosen slot —
+    // rebuild the checkboxes so only relevant regimes are shown.
+    if (allRows.length) buildRegimeChecks();
+  });
+});
+document.querySelectorAll('[data-mode]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    selectedMode = btn.dataset.mode;
+  });
+});
+document.getElementById('noisePct').addEventListener('input', function() {
+  const v = Math.max(5, Math.min(49, parseInt(this.value)||30));
+  document.getElementById('noiseMiddle').textContent = 100 - v*2;
+});
+document.getElementById('runBtn').addEventListener('click', runAnalysis);
+
+// Build regime checkboxes from the snapshot column matching the current slot.
+function buildRegimeChecks() {
+  const cols = selectedSlot === '09:35' ? ['snap935_regime'] : ['snap940_regime'];
+
+  const regSet = new Set();
+  allRows.forEach(r => {
+    cols.forEach(col => {
+      const v = (r[col] || '').trim();
+      if (v && v !== 'null') regSet.add(v);
+    });
+  });
+  availableRegimes  = [...regSet].sort();
+  selectedRegimes   = new Set(availableRegimes); // default: all selected
+
+  const host = document.getElementById('regimeChecks');
+  host.innerHTML = '';
+  availableRegimes.forEach(regime => {
+    const lbl = document.createElement('label');
+    lbl.className = 'chk-item on';
+    const inp = document.createElement('input');
+    inp.type = 'checkbox'; inp.checked = true; inp.value = regime;
+    inp.addEventListener('change', () => {
+      if (inp.checked) selectedRegimes.add(regime); else selectedRegimes.delete(regime);
+      lbl.classList.toggle('on', inp.checked);
+    });
+    lbl.appendChild(inp);
+    lbl.appendChild(document.createTextNode(' ' + regime));
+    host.appendChild(lbl);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MAIN ANALYSIS
+// ══════════════════════════════════════════════════════════════════
+//
+// Slot is a COLUMN selector. Every CSV row has both 35 and 40 columns.
+// Choosing 9:35 means: read entry35/hh35/ll35/up_r35/down_r35 and snap935_* for ALL rows.
+// Choosing 9:40 means: read entry40/hh40/ll40/up_r40/down_r40 and snap940_* for ALL rows.
+//
+// 6 combinations (2 slots × 3 modes) → output column:
+//   9:35 × Up    → up_r35
+//   9:35 × Down  → down_r35
+//   9:35 × Max   → max(up_r35, down_r35)
+//   9:40 × Up    → up_r40
+//   9:40 × Down  → down_r40
+//   9:40 × Max   → max(up_r40, down_r40)
+//
+function makeWorkingRow(row, suffix, snapPfx) {
+  const upR   = parseFloat(row['up_r'   + suffix]);
+  const downR = parseFloat(row['down_r' + suffix]);
+  // Only require the column(s) actually needed for the chosen mode.
+  if (selectedMode === 'up'   && !isFinite(upR))   return null;
+  if (selectedMode === 'down' && !isFinite(downR))  return null;
+  if (selectedMode === 'max'  && (!isFinite(upR) || !isFinite(downR))) return null;
+  const output = selectedMode === 'up'   ? upR
+               : selectedMode === 'down' ? downR
+               : Math.max(upR, downR);
+  return {
+    ...row,
+    _entrySlot: suffix === '35' ? '09:35' : '09:40',
+    _upR:     upR,
+    _downR:   downR,
+    _output:  output,
+    _regime:  row[snapPfx + '_regime']   || '',
+    _lt:      row[snapPfx + '_lt']       || '',
+    _mt:      row[snapPfx + '_mt']       || '',
+    _st:      row[snapPfx + '_st']       || '',
+    _secBias: row[snapPfx + '_sec_bias'] || '',
+  };
+}
+
+function runAnalysis() {
+  const noisePct = Math.max(5, Math.min(49, parseInt(document.getElementById('noisePct').value)||30));
+
+  // ── Step 1: column selection ──────────────────────────────────────
+  // Slot determines WHICH columns to read. Every row is processed using
+  // the suffix that matches the chosen slot. No rows are excluded here —
+  // only rows where the needed output column is missing are dropped.
+  const suffix  = selectedSlot === '09:35' ? '35'      : '40';
+  const snapPfx = selectedSlot === '09:35' ? 'snap935' : 'snap940';
+
+  const validRows   = [];  // have valid output for chosen slot+mode
+  const missingRows = [];  // output column missing/non-numeric → skipped
+
+  allRows.forEach(row => {
+    const r = makeWorkingRow(row, suffix, snapPfx);
+    if (r) validRows.push(r);
+    else   missingRows.push({ ...row, _status: 'missing' });
+  });
+
+  // ── Step 2: regime filter ─────────────────────────────────────────
+  const regimePassed = [];
+  const regimeFailed = [];
+  const filterAll = selectedRegimes.size >= availableRegimes.length;
+  validRows.forEach(r => {
+    if (filterAll || selectedRegimes.has(r._regime)) regimePassed.push(r);
+    else regimeFailed.push(r);
+  });
+
+  // ── Step 3: noise cut ─────────────────────────────────────────────
+  // Sort by output, keep top N% and bottom N%, drop middle.
+  const sorted = [...regimePassed].sort((a,b) => a._output - b._output);
+  const n   = sorted.length;
+  const cut = Math.round(n * noisePct / 100);
+  const finalRows = n > 0 ? sorted.filter((_,i) => i < cut || i >= n - cut) : [];
+  const noiseRows = n > 0 ? sorted.filter((_,i) => i >= cut && i < n - cut)  : [];
+
+  // ── Resolve active column names ───────────────────────────────────
+  const snap      = snapPfx;
+  const outCol    = selectedMode === 'up'   ? 'up_r'   + suffix
+                  : selectedMode === 'down' ? 'down_r' + suffix
+                  : 'max(up_r' + suffix + ',down_r' + suffix + ')';
+  const modeLabel = selectedMode === 'up' ? '↑ Up R' : selectedMode === 'down' ? '↓ Down R' : '⬆⬇ Max R';
+
+  // ── Summary bar ───────────────────────────────────────────────────
+  document.getElementById('sTotal').textContent  = allRows.length;
+  document.getElementById('sSlot').textContent   = validRows.length;
+  document.getElementById('sRegime').textContent = regimePassed.length;
+  document.getElementById('sOutput').textContent = regimePassed.length;
+  document.getElementById('sFinal').textContent  = finalRows.length;
+  document.getElementById('sOutputMode').textContent =
+    'Combination: ' + selectedSlot + ' × ' + modeLabel + ' → ' + outCol +
+    ' · Noise cut: ±' + noisePct + '%';
+
+  // ── Active-columns strip ──────────────────────────────────────────
+  document.getElementById('colStrip').style.display = 'flex';
+  document.getElementById('colSlot').textContent  = selectedSlot + ' columns · all ' + allRows.length + ' rows';
+  document.getElementById('colEntry').textContent = 'entry' + suffix;
+  document.getElementById('colHH').textContent    = 'hh' + suffix;
+  document.getElementById('colLL').textContent    = 'll' + suffix;
+  document.getElementById('colOut').textContent   = outCol;
+  document.getElementById('colSnap').textContent  = snap + '_*';
+
+  // ── Data preview table ────────────────────────────────────────────
+  // Passes EXACTLY the same row sets used for factor analysis.
+  renderDataTable(finalRows, noiseRows, regimeFailed, missingRows, suffix, outCol);
+
+  // ── Factor analysis ───────────────────────────────────────────────
+  // Uses the identical finalRows — same data as shown in the preview table.
+  renderAllFactors(finalRows);
+
+  // ── Statistical correlation summary ──────────────────────────────
+  const threshold = Math.max(0.1, parseFloat(document.getElementById('successThreshold').value) || 1.3);
+  renderCorrelationSummary(finalRows, threshold, outCol);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DATA PREVIEW TABLE
+// Shows every CSV row with its status so the user can visually
+// verify the same data the factor analysis uses.
+// Row statuses:
+//   FINAL   — in the analysis set (teal)
+//   NOISE   — passed regime but cut as middle noise (amber)
+//   REGIME  — excluded by regime filter (red)
+//   MISSING — output column missing for chosen slot/mode (grey)
+// ══════════════════════════════════════════════════════════════════
+function renderDataTable(finalRows, noiseRows, regimeFailed, missingRows, suffix, outCol) {
+  const wrap = document.getElementById('previewWrap');
+  const body = document.getElementById('previewBody');
+  const meta = document.getElementById('previewMeta');
+
+  wrap.style.display = 'block';
+
+  const total = finalRows.length + noiseRows.length + regimeFailed.length + missingRows.length;
+  meta.textContent =
+    finalRows.length + ' FINAL · ' +
+    noiseRows.length + ' noise · ' +
+    regimeFailed.length + ' regime out · ' +
+    missingRows.length + ' missing — ' + total + ' total rows';
+
+  // Tag each working row with its status
+  const tagged = [
+    ...finalRows.map(r => ({ r, status:'final' })),
+    ...noiseRows.map(r => ({ r, status:'noise' })),
+    ...regimeFailed.map(r => ({ r, status:'regime' })),
+    ...missingRows.map(r => ({ r, status:'missing' })),
+  ];
+
+  // Sort by date then ticker for consistent ordering
+  tagged.sort((a,b) => {
+    const da = a.r.date || '', db = b.r.date || '';
+    if (da < db) return -1; if (da > db) return 1;
+    return (a.r.ticker||'').localeCompare(b.r.ticker||'');
+  });
+
+  const MAX_ROWS = 500;
+  const shown = tagged.slice(0, MAX_ROWS);
+
+  const is35 = suffix === '35';
+  const dim35 = !is35 ? ' dim' : '';
+  const dim40 =  is35 ? ' dim' : '';
+
+  // Column definitions: [key, label, thClass, tdClass, getValue]
+  const COLS = [
+    // status
+    ['_status', 'Status', 'th-id', '',       t => statusBadge(t.status)],
+    // identifiers
+    ['date',    'Date',   'th-id', '',       t => t.r.date   || ''],
+    ['ticker',  'Ticker', 'th-id', '',       t => t.r.ticker || ''],
+    // slot 35 group
+    ['entry35', 'entry35','th-35 grp-sep'+dim35, 'grp-sep'+dim35, t => t.r.entry35  || ''],
+    ['hh35',    'hh35',   'th-35'+dim35,         dim35,           t => t.r.hh35     || ''],
+    ['ll35',    'll35',   'th-35'+dim35,          dim35,          t => t.r.ll35     || ''],
+    ['up_r35',  'up_r35', 'th-35'+dim35,          dim35,          t => fmt(t.r.up_r35)],
+    ['down_r35','dn_r35', 'th-35'+dim35,          dim35,          t => fmt(t.r.down_r35)],
+    // slot 40 group
+    ['entry40', 'entry40','th-40 grp-sep'+dim40, 'grp-sep'+dim40, t => t.r.entry40  || ''],
+    ['hh40',    'hh40',   'th-40'+dim40,          dim40,          t => t.r.hh40     || ''],
+    ['ll40',    'll40',   'th-40'+dim40,          dim40,          t => t.r.ll40     || ''],
+    ['up_r40',  'up_r40', 'th-40'+dim40,          dim40,          t => fmt(t.r.up_r40)],
+    ['down_r40','dn_r40', 'th-40'+dim40,          dim40,          t => fmt(t.r.down_r40)],
+    // snap 935 context
+    ['s35_reg', 'snap935_regime', 'th-snap35 grp-sep'+dim35, 'grp-sep'+dim35, t => t.r.snap935_regime || ''],
+    ['s35_lt',  'snap935_lt',     'th-snap35'+dim35,           dim35,          t => t.r.snap935_lt    || ''],
+    ['s35_mt',  'snap935_mt',     'th-snap35'+dim35,           dim35,          t => t.r.snap935_mt    || ''],
+    ['s35_st',  'snap935_st',     'th-snap35'+dim35,           dim35,          t => t.r.snap935_st    || ''],
+    // snap 940 context
+    ['s40_reg', 'snap940_regime', 'th-snap40 grp-sep'+dim40, 'grp-sep'+dim40, t => t.r.snap940_regime || ''],
+    ['s40_lt',  'snap940_lt',     'th-snap40'+dim40,           dim40,          t => t.r.snap940_lt    || ''],
+    ['s40_mt',  'snap940_mt',     'th-snap40'+dim40,           dim40,          t => t.r.snap940_mt    || ''],
+    ['s40_st',  'snap940_st',     'th-snap40'+dim40,           dim40,          t => t.r.snap940_st    || ''],
+    // computed output
+    ['_output', outCol,  'th-out grp-sep', 'td-out grp-sep', t => t.r._output !== undefined ? fmt(t.r._output) : '—'],
+  ];
+
+  let html = '<table class="ptbl"><thead><tr>';
+  COLS.forEach(([,lbl,thCls]) => {
+    html += `<th class="${thCls}">${esc(lbl)}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  shown.forEach(t => {
+    const rowCls = 'row-' + t.status;
+    html += `<tr class="${rowCls}">`;
+    COLS.forEach(([key,,, tdCls, get]) => {
+      const val = get(t);
+      // status column contains HTML badge — don't escape it
+      const cell = key === '_status' ? val : esc(val);
+      html += `<td class="${tdCls}">${cell}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  if (tagged.length > MAX_ROWS) {
+    html += `<div style="padding:8px 12px;font-size:10px;color:var(--muted2)">Showing first ${MAX_ROWS} of ${tagged.length} rows. All rows are used in the factor analysis above.</div>`;
+  }
+
+  body.innerHTML = html;
+}
+
+function statusBadge(status) {
+  if (status === 'final')   return '<span class="st-badge st-final">✓ FINAL</span>';
+  if (status === 'noise')   return '<span class="st-badge st-noise">~ NOISE</span>';
+  if (status === 'regime')  return '<span class="st-badge st-regime">✗ REGIME</span>';
+  return '<span class="st-badge st-missing">— MISSING</span>';
+}
+
+function fmt(v) {
+  const n = parseFloat(v);
+  if (!isFinite(n)) return v || '—';
+  return n.toFixed(3);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FACTOR DEFINITIONS
+// ══════════════════════════════════════════════════════════════════
+function pf(row, col) { return parseFloat(row[col]); }
+
+// Numeric bracket helpers — always returns ALL defined brackets (even empty ones)
+// so gaps in the data don't silently disappear from the table.
+function numBrackets(get, brackets) {
+  return function(rows) {
+    const result = brackets.map(b => ({
+      label: b.label,
+      rows: rows.filter(r => { const v = get(r); return isFinite(v) && b.test(v); }),
+      _numericPlaceholder: true
+    }));
+    // append N/A bucket for rows where the value is missing/non-numeric
+    const naRows = rows.filter(r => !isFinite(get(r)));
+    if (naRows.length) result.push({ label: 'N/A (missing)', rows: naRows, _numericPlaceholder: true });
+    return result;
+  };
+}
+// Categorical bracket helper
+function catBrackets(get) {
+  return function(rows) {
+    const map = {};
+    rows.forEach(r => {
+      const v = String(get(r) || 'Unknown');
+      if (!map[v]) map[v] = [];
+      map[v].push(r);
+    });
+    return Object.keys(map).sort((a,b) => map[b].length - map[a].length)
+      .map(k => ({ label: k, rows: map[k] }));
+  };
+}
+
+// EMA relationship
+function emaStack(row) {
+  const e9=pf(row,'ema9'), e13=pf(row,'ema13'), e20=pf(row,'ema20'), e50=pf(row,'ema50');
+  if (!isFinite(e9)||!isFinite(e13)||!isFinite(e20)||!isFinite(e50)) return 'N/A';
+  const a9gt13=e9>e13, a13gt20=e13>e20, a20gt50=e20>e50;
+  if (a9gt13 && a13gt20 && a20gt50) return '9>13>20>50 (full bull)';
+  if (a9gt13 && a13gt20 && !a20gt50) return '9>13>20 below 50';
+  if (!a9gt13 && !a13gt20 && !a20gt50) return '9<13<20<50 (full bear)';
+  if (!a9gt13 && !a13gt20 && a20gt50) return '9<13<20 above 50';
+  return 'Mixed';
+}
+function priceVsEMA(row, ema) {
+  const p=pf(row,'price'), e=pf(row,ema);
+  if (!isFinite(p)||!isFinite(e)) return 'N/A';
+  return p > e ? 'Above' : 'Below';
+}
+function priceVsVWAP(row) {
+  const p=pf(row,'price'), v=pf(row,'vwap');
+  if (!isFinite(p)||!isFinite(v)) return 'N/A';
+  return p > v ? 'Above VWAP' : 'Below VWAP';
+}
+function monthPosBucket(row) {
+  const v = pf(row,'month_range_pos');
+  if (!isFinite(v)) return 'N/A';
+  if (v < 20) return '0–20% (near low)';
+  if (v < 40) return '20–40%';
+  if (v < 60) return '40–60% (mid)';
+  if (v < 80) return '60–80%';
+  return '80–100% (near high)';
+}
+
+const FACTOR_GROUPS = [
+  {
+    title: '🌊 Market Context (snapshot at entry)',
+    factors: [
+      { id:'snap_regime', label:'Regime', fn: catBrackets(r => r._regime) },
+      { id:'snap_lt',     label:'Long-term',  fn: catBrackets(r => r._lt) },
+      { id:'snap_mt',     label:'Mid-term',   fn: catBrackets(r => r._mt) },
+      { id:'snap_st',     label:'Short-term', fn: catBrackets(r => r._st) },
+      { id:'snap_sec',    label:'Sector bias (snapshot)', fn: catBrackets(r => r._secBias) },
+    ]
+  },
+  {
+    title: '🏷 Screener & Sector',
+    factors: [
+      { id:'screeners', label:'Screener(s) matched', fn: catBrackets(r => r.screeners) },
+      { id:'sector',    label:'Sector',              fn: catBrackets(r => r.sector) },
+      { id:'industry',  label:'Industry',            fn: catBrackets(r => r.industry) },
+      { id:'sec_bias',  label:'Sector bias (capture)', fn: catBrackets(r => r.sec_bias) },
+      { id:'sec_hot',   label:'Sector hot',          fn: catBrackets(r => r.sec_hot === 'true' ? '🔥 Hot' : 'Not hot') },
+    ]
+  },
+  {
+    title: '📈 Price Action',
+    factors: [
+      { id:'price', label:'Price ($)', getValue: r => pf(r,'price'), fn: numBrackets(r => pf(r,'price'), [
+          {label:'<$2',     test:v=>v<2},
+          {label:'$2–5',    test:v=>v>=2&&v<5},
+          {label:'$5–10',   test:v=>v>=5&&v<10},
+          {label:'$10–20',  test:v=>v>=10&&v<20},
+          {label:'$20–50',  test:v=>v>=20&&v<50},
+          {label:'$50+',    test:v=>v>=50},
+        ])},
+      { id:'change_pct', label:'Change % (day)', getValue: r => pf(r,'change_pct'), fn: numBrackets(r => pf(r,'change_pct'), [
+          {label:'<10%',     test:v=>v<10},
+          {label:'10–25%',   test:v=>v>=10&&v<25},
+          {label:'25–50%',   test:v=>v>=25&&v<50},
+          {label:'50–100%',  test:v=>v>=50&&v<100},
+          {label:'>100%',    test:v=>v>=100},
+          {label:'Negative', test:v=>v<0},
+        ])},
+      { id:'gap_pct', label:'Gap % (vs prev close)', getValue: r => pf(r,'gap_pct'), fn: numBrackets(r => pf(r,'gap_pct'), [
+          {label:'Neg gap',   test:v=>v<0},
+          {label:'0–10%',     test:v=>v>=0&&v<10},
+          {label:'10–30%',    test:v=>v>=10&&v<30},
+          {label:'30–50%',    test:v=>v>=30&&v<50},
+          {label:'50–100%',   test:v=>v>=50&&v<100},
+          {label:'>100%',     test:v=>v>=100},
+        ])},
+      { id:'vs_vwap', label:'Price vs VWAP', fn: catBrackets(priceVsVWAP) },
+      { id:'vs_ema50', label:'Price vs EMA50', fn: catBrackets(r => priceVsEMA(r,'ema50')) },
+      { id:'vs_sma5',  label:'Price vs SMA5',  fn: catBrackets(r => priceVsEMA(r,'sma5')) },
+    ]
+  },
+  {
+    title: '🔧 Technical Setup (EMAs)',
+    factors: [
+      { id:'ema_stack', label:'EMA Stack (9/13/20 vs 50)', fn: catBrackets(emaStack) },
+      { id:'vs_ema9',  label:'Price vs EMA9',  fn: catBrackets(r => priceVsEMA(r,'ema9')) },
+      { id:'vs_ema13', label:'Price vs EMA13', fn: catBrackets(r => priceVsEMA(r,'ema13')) },
+      { id:'vs_ema20', label:'Price vs EMA20', fn: catBrackets(r => priceVsEMA(r,'ema20')) },
+      { id:'month_pos', label:'Monthly range position', fn: catBrackets(monthPosBucket) },
+    ]
+  },
+  {
+    title: '📊 Volume & Float',
+    factors: [
+      { id:'rvol', label:'RVOL (10d)', getValue: r => pf(r,'rvol'), fn: numBrackets(r => pf(r,'rvol'), [
+          {label:'<5x',     test:v=>v<5},
+          {label:'5–20x',   test:v=>v>=5&&v<20},
+          {label:'20–50x',  test:v=>v>=20&&v<50},
+          {label:'50–200x', test:v=>v>=50&&v<200},
+          {label:'>200x',   test:v=>v>=200},
+        ])},
+      { id:'mcap', label:'Market Cap', getValue: r => pf(r,'mcap'), fn: numBrackets(r => pf(r,'mcap'), [
+          {label:'<$10M',    test:v=>v<10e6},
+          {label:'$10–50M',  test:v=>v>=10e6&&v<50e6},
+          {label:'$50–200M', test:v=>v>=50e6&&v<200e6},
+          {label:'$200M–1B', test:v=>v>=200e6&&v<1e9},
+          {label:'>$1B',     test:v=>v>=1e9},
+        ])},
+      { id:'float', label:'Float shares', getValue: r => pf(r,'float_shares'), fn: numBrackets(r => pf(r,'float_shares'), [
+          {label:'<1M',    test:v=>v<1e6},
+          {label:'1–5M',   test:v=>v>=1e6&&v<5e6},
+          {label:'5–20M',  test:v=>v>=5e6&&v<20e6},
+          {label:'20–100M',test:v=>v>=20e6&&v<100e6},
+          {label:'>100M',  test:v=>v>=100e6},
+        ])},
+      { id:'short_float', label:'Short float %', getValue: r => pf(r,'short_float'), fn: numBrackets(r => pf(r,'short_float'), [
+          {label:'Unknown',  test:v=>!isFinite(v)},
+          {label:'<5%',      test:v=>isFinite(v)&&v<5},
+          {label:'5–15%',    test:v=>v>=5&&v<15},
+          {label:'15–30%',   test:v=>v>=15&&v<30},
+          {label:'>30%',     test:v=>v>=30},
+        ])},
+    ]
+  },
+  {
+    title: '🌋 Volatility & Range',
+    factors: [
+      { id:'atr', label:'ATR ($)', getValue: r => pf(r,'atr'), fn: numBrackets(r => pf(r,'atr'), [
+          {label:'<$0.20',  test:v=>v<0.2},
+          {label:'$0.20–0.50', test:v=>v>=0.2&&v<0.5},
+          {label:'$0.50–1', test:v=>v>=0.5&&v<1},
+          {label:'$1–3',    test:v=>v>=1&&v<3},
+          {label:'>$3',     test:v=>v>=3},
+        ])},
+      { id:'adr_pct', label:'ADR %', getValue: r => pf(r,'adr_pct'), fn: numBrackets(r => pf(r,'adr_pct'), [
+          {label:'<5%',    test:v=>v<5},
+          {label:'5–10%',  test:v=>v>=5&&v<10},
+          {label:'10–20%', test:v=>v>=10&&v<20},
+          {label:'20–30%', test:v=>v>=20&&v<30},
+          {label:'>30%',   test:v=>v>=30},
+        ])},
+      { id:'pm_range', label:'PM Range ($)', getValue: r => pf(r,'pm_range'), fn: numBrackets(r => pf(r,'pm_range'), [
+          {label:'<$0.3',  test:v=>v<0.3},
+          {label:'$0.3–1', test:v=>v>=0.3&&v<1},
+          {label:'$1–3',   test:v=>v>=1&&v<3},
+          {label:'>$3',    test:v=>v>=3},
+        ])},
+      { id:'pm_adr', label:'PM Range / ADR ratio', getValue: r => pf(r,'pm_adr_ratio'), fn: numBrackets(r => pf(r,'pm_adr_ratio'), [
+          {label:'<0.5',   test:v=>v<0.5},
+          {label:'0.5–1',  test:v=>v>=0.5&&v<1},
+          {label:'1–2',    test:v=>v>=1&&v<2},
+          {label:'2–5',    test:v=>v>=2&&v<5},
+          {label:'>5',     test:v=>v>=5},
+        ])},
+    ]
+  },
+  {
+    title: '🗺 Sector Score',
+    factors: [
+      { id:'sec_score', label:'Sector score', getValue: r => pf(r,'sec_score'), fn: numBrackets(r => pf(r,'sec_score'), [
+          {label:'<−50 (very bearish)', test:v=>v<-50},
+          {label:'−50 to −20',         test:v=>v>=-50&&v<-20},
+          {label:'−20 to +20 (neutral)',test:v=>v>=-20&&v<=20},
+          {label:'+20 to +50',         test:v=>v>20&&v<=50},
+          {label:'>+50 (very bullish)', test:v=>v>50},
+        ])},
+    ]
+  },
+];
+
+// ══════════════════════════════════════════════════════════════════
+// RENDERING
+// ══════════════════════════════════════════════════════════════════
+const THRESHOLDS = [
+  { key:'lt1',  label:'<1R',   test: v => v < 1   },
+  { key:'gt1',  label:'≥1R',   test: v => v >= 1  },
+  { key:'gt15', label:'≥1.5R', test: v => v >= 1.5},
+  { key:'gt2',  label:'≥2R',   test: v => v >= 2  },
+  { key:'gt3',  label:'≥3R',   test: v => v >= 3  },
+];
+
+function computeBracketStats(bracketRows) {
+  const n = bracketRows.length;
+  const stats = { n };
+  THRESHOLDS.forEach(t => {
+    stats[t.key] = bracketRows.filter(r => t.test(r._output)).length;
+  });
+  stats.avg = n ? bracketRows.reduce((s,r) => s + r._output, 0) / n : null;
+  return stats;
+}
+
+function heatClass(pct, colPcts) {
+  if (!colPcts.length) return '';
+  const mn = Math.min(...colPcts), mx = Math.max(...colPcts);
+  if (mx === mn) return 'h2';
+  const norm = (pct - mn) / (mx - mn);
+  if (norm < 0.2) return 'h0';
+  if (norm < 0.4) return 'h1';
+  if (norm < 0.6) return 'h2';
+  if (norm < 0.8) return 'h3';
+  return 'h4';
+}
+
+function renderFactor(factor, allFilteredRows) {
+  const brackets = factor.fn(allFilteredRows);
+
+  // For numeric factors: show ALL brackets (including empty) so gaps are visible.
+  // For categorical factors: only show brackets that actually have data (auto-expand).
+  const isNumeric = brackets.length > 0 && brackets[0]._numericPlaceholder;
+  const displayBrackets = isNumeric
+    ? brackets  // always show all defined numeric ranges
+    : brackets.filter(b => b.rows.length > 0);  // categorical: only what exists
+
+  if (!displayBrackets.length) {
+    return '<div style="color:var(--muted2);font-size:11px;padding:6px 0">No data for this factor.</div>';
+  }
+
+  const statsArr = displayBrackets.map(b => computeBracketStats(b.rows));
+  const totalN = allFilteredRows.length;
+
+  // Heat coloring uses only non-empty brackets so zeros don't drag everything down
+  const colPcts = {};
+  THRESHOLDS.forEach(t => {
+    colPcts[t.key] = statsArr.filter(s => s.n > 0).map(s => (s[t.key]/s.n)*100);
+  });
+
+  let html = '<div class="ftbl-wrap"><table class="ftbl"><thead><tr>';
+  html += '<th style="text-align:left">Bracket</th>';
+  html += '<th>N</th><th>% of set</th><th>Avg R</th>';
+  THRESHOLDS.forEach(t => { html += `<th>${t.label}</th>`; });
+  html += '</tr></thead><tbody>';
+
+  displayBrackets.forEach((b, i) => {
+    const s = statsArr[i];
+    const isEmpty = s.n === 0;
+    const rowStyle = isEmpty ? ' style="opacity:.35"' : '';
+
+    const setPct = totalN ? ((s.n/totalN)*100).toFixed(1) : '0.0';
+    const avgStr = s.avg !== null ? (s.avg >= 0 ? '+' : '') + s.avg.toFixed(2) : '—';
+    const avgColor = isEmpty || s.avg === null ? 'var(--muted2)'
+                   : s.avg >= 2 ? 'var(--green)'
+                   : s.avg >= 1 ? 'var(--teal)'
+                   : s.avg < 0  ? 'var(--red)'
+                   : 'var(--amber)';
+
+    html += `<tr${rowStyle}>`;
+    html += `<td>${esc(b.label)}${isEmpty ? ' <span style="font-size:9px;color:var(--muted2)">(no data yet)</span>' : ''}</td>`;
+    html += `<td class="n-col">${isEmpty ? '—' : s.n}</td>`;
+    html += `<td class="pct-col">${isEmpty ? '—' : setPct + '%'}</td>`;
+    html += `<td style="color:${avgColor};font-weight:700">${isEmpty ? '—' : avgStr}</td>`;
+
+    THRESHOLDS.forEach(t => {
+      if (isEmpty) {
+        html += '<td style="color:var(--muted2)">—</td>';
+      } else {
+        const pct = (s[t.key]/s.n)*100;
+        const hc  = heatClass(pct, colPcts[t.key]);
+        html += `<td class="${hc}"><div class="cell-dual"><div class="cell-n">${s[t.key]}</div><div class="cell-pct">${pct.toFixed(0)}%</div></div></td>`;
+      }
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function renderAllFactors(finalRows) {
+  const content = document.getElementById('content');
+  if (!finalRows.length) {
+    content.innerHTML = '<div class="empty-msg">No rows remain after filters + noise cut. Try adjusting settings.</div>';
+    return;
+  }
+
+  let html = '';
+  FACTOR_GROUPS.forEach((group, gi) => {
+    html += `<div class="fsec open" id="grp${gi}">`;
+    html += `<div class="fsec-hdr" onclick="toggleSec('grp${gi}')">`;
+    html += `<span class="fsec-title">${group.title}</span>`;
+    html += `<span class="fsec-count">${group.factors.length} factor${group.factors.length!==1?'s':''}</span>`;
+    html += `<span class="fsec-chev">▾</span></div>`;
+    html += `<div class="fsec-body">`;
+
+    group.factors.forEach((factor, fi) => {
+      const subId = `grp${gi}_f${fi}`;
+      html += `<div class="fsec" id="${subId}" style="border:1px solid var(--border);margin-bottom:8px;border-radius:8px">`;
+      html += `<div class="fsec-hdr" onclick="toggleSec('${subId}')" style="background:var(--panel2)">`;
+      html += `<span style="font-size:12px;font-weight:700;color:var(--txt2)">${esc(factor.label)}</span>`;
+      html += `<span class="fsec-chev">▾</span></div>`;
+      html += `<div class="fsec-body">`;
+      html += renderFactor(factor, finalRows);
+      html += `</div></div>`;
+    });
+
+    html += `</div></div>`;
+  });
+
+  content.innerHTML = html;
+
+  // open all top-level groups by default, close sub-factors
+  document.querySelectorAll('.fsec').forEach(el => {
+    if (el.id.match(/^grp\d+$/)) el.classList.add('open');
+    else el.classList.add('open'); // open all by default for now
+  });
+}
+
+function toggleSec(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// UTILITIES
+// ══════════════════════════════════════════════════════════════════
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function showErr(msg) {
+  document.getElementById('errBar').innerHTML =
+    `<div class="err">⚠ ${esc(msg)}</div>`;
+}
+function clearErr() {
+  document.getElementById('errBar').innerHTML = '';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STATISTICS LIBRARY (pure JS, no external dependencies)
+// ══════════════════════════════════════════════════════════════════
+
+// Standard normal CDF — Abramowitz & Stegun approximation (error < 7.5e-8)
+function normalCDF(z) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp(-z * z / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.7814779 + t * (-1.8212560 + t * 1.3302744))));
+  return z >= 0 ? 1 - p : p;
+}
+
+// Chi-square p-value via Wilson–Hilferty normal approximation
+function chiSquarePValue(chi2, df) {
+  if (df <= 0 || chi2 <= 0) return 1;
+  const mu = 1 - 2 / (9 * df);
+  const sigma = Math.sqrt(2 / (9 * df));
+  const z = (Math.cbrt(chi2 / df) - mu) / sigma;
+  return 1 - normalCDF(z);
+}
+
+// Chi-square statistic + Cramér's V from bracket list and binary success test.
+// Cramér's V: sqrt(χ² / (n × (min(r,c)−1))).
+// Here the contingency table is 2 rows (success / fail) × k columns (brackets).
+// So min(r,c)−1 = min(2,k)−1 = 1  (for k≥2), simplifying to V = sqrt(χ²/n).
+function chiSquareAndV(brackets, successTest) {
+  const activeBrackets = brackets.filter(b => b.rows.length > 0);
+  const k = activeBrackets.length;
+  if (k < 2) return { chi2: 0, V: 0, p: 1, df: 0 };
+
+  const n          = activeBrackets.reduce((s, b) => s + b.rows.length, 0);
+  const totalS     = activeBrackets.reduce((s, b) => s + b.rows.filter(successTest).length, 0);
+  const totalF     = n - totalS;
+  if (totalS === 0 || totalF === 0) return { chi2: 0, V: 0, p: 1, df: k - 1 };
+
+  let chi2 = 0;
+  activeBrackets.forEach(b => {
+    const obsS = b.rows.filter(successTest).length;
+    const obsF = b.rows.length - obsS;
+    const expS = b.rows.length * totalS / n;
+    const expF = b.rows.length * totalF / n;
+    if (expS > 0.5) chi2 += (obsS - expS) ** 2 / expS;
+    if (expF > 0.5) chi2 += (obsF - expF) ** 2 / expF;
+  });
+
+  const df = k - 1;
+  const V  = Math.min(Math.sqrt(chi2 / n), 1); // minDim-1 = 1 for 2-row table
+  const p  = chiSquarePValue(chi2, df);
+  return { chi2, V, p, df };
+}
+
+// Information Value (IV) and per-bracket Weight of Evidence (WoE).
+// WoE_i = ln(% events in bucket i / % non-events in bucket i).
+// IV = Σ (distrib_events − distrib_nonevents) × WoE.
+// IV interpretation: <0.02 = useless, 0.02–0.1 = weak, 0.1–0.3 = medium, >0.3 = strong.
+function infoValue(brackets, successTest) {
+  const totalS = brackets.reduce((s, b) => s + b.rows.filter(successTest).length, 0);
+  const totalF = brackets.reduce((s, b) => s + b.rows.filter(r => !successTest(r)).length, 0);
+  if (!totalS || !totalF) return { iv: 0, detail: [] };
+
+  let iv = 0;
+  const detail = brackets.map(b => {
+    const s  = b.rows.filter(successTest).length;
+    const f  = b.rows.length - s;
+    const ds = (s / totalS) || 1e-9;   // distribution of successes
+    const df = (f / totalF) || 1e-9;   // distribution of failures
+    const woe    = Math.log(ds / df);
+    const contrib = (ds - df) * woe;
+    iv += contrib;
+    return { label: b.label, n: b.rows.length, s, f, ds, df, woe, contrib };
+  });
+
+  return { iv: Math.max(0, iv), detail };
+}
+
+// Eta-squared (η²): proportion of variance in _output explained by bracket membership.
+// η² = SS_between / SS_total.  Interpretation: <0.01 small, 0.01–0.06 medium, ≥0.14 large.
+function etaSquared(brackets) {
+  const allRows  = brackets.flatMap(b => b.rows);
+  const n        = allRows.length;
+  if (n < 2) return null;
+  const grandMean = allRows.reduce((s, r) => s + r._output, 0) / n;
+  const ssTotal   = allRows.reduce((s, r) => s + (r._output - grandMean) ** 2, 0);
+  if (ssTotal === 0) return null;
+  const ssBetween = brackets.reduce((s, b) => {
+    if (!b.rows.length) return s;
+    const bMean = b.rows.reduce((a, r) => a + r._output, 0) / b.rows.length;
+    return s + b.rows.length * (bMean - grandMean) ** 2;
+  }, 0);
+  return Math.min(ssBetween / ssTotal, 1);
+}
+
+// Spearman rank correlation between raw factor value and _output.
+// Used for numeric factors to detect monotonic relationships.
+function spearmanRho(rows, getValue) {
+  const pairs = rows.map(r => ({ x: getValue(r), y: r._output }))
+                    .filter(p => isFinite(p.x) && isFinite(p.y));
+  const n = pairs.length;
+  if (n < 5) return null;
+
+  function assignRanks(vals) {
+    const sorted = vals.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+    const ranks  = new Array(n);
+    let i = 0;
+    while (i < n) {
+      let j = i;
+      while (j < n - 1 && sorted[j + 1].v === sorted[j].v) j++;
+      const avg = (i + j) / 2 + 1;
+      for (let k = i; k <= j; k++) ranks[sorted[k].i] = avg;
+      i = j + 1;
+    }
+    return ranks;
+  }
+
+  const rx = assignRanks(pairs.map(p => p.x));
+  const ry = assignRanks(pairs.map(p => p.y));
+  let sumD2 = 0;
+  for (let i = 0; i < n; i++) sumD2 += (rx[i] - ry[i]) ** 2;
+  return 1 - (6 * sumD2) / (n * (n * n - 1));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CORRELATION SUMMARY RENDERER
+// ══════════════════════════════════════════════════════════════════
+let _corrData = []; // stored for CSV export
+
+function renderCorrelationSummary(finalRows, threshold, outCol) {
+  const sec = document.getElementById('correlationSection');
+  if (!finalRows.length) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+
+  const successTest = r => r._output >= threshold;
+  const nSuccess    = finalRows.filter(successTest).length;
+  const basePct     = (nSuccess / finalRows.length * 100).toFixed(1);
+
+  // ── Compute stats for every factor ──────────────────────────────
+  _corrData = [];
+  FACTOR_GROUPS.forEach(group => {
+    group.factors.forEach(factor => {
+      const brackets = factor.fn(finalRows).filter(b => b.rows.length >= 1);
+      if (brackets.length < 2) return;
+
+      const cv    = chiSquareAndV(brackets, successTest);
+      const ivRes = infoValue(brackets, successTest);
+      const η2    = etaSquared(brackets);
+      const rho   = factor.getValue ? spearmanRho(finalRows, factor.getValue) : null;
+
+      // Success rate per bracket (for bracket detail table)
+      const bracketStats = ivRes.detail.map(d => {
+        const rate = d.n ? d.s / d.n : null;
+        return { ...d, rate };
+      });
+
+      // Verdict based on Cramér's V primary, IV secondary
+      const verdict = cv.V >= 0.40                        ? 'strong'
+                    : cv.V >= 0.20 || ivRes.iv >= 0.10    ? 'moderate'
+                    : cv.V >= 0.10 || ivRes.iv >= 0.02    ? 'weak'
+                    : 'noise';
+
+      _corrData.push({
+        group: group.title,
+        factor: factor.label,
+        id: factor.id,
+        V: cv.V,
+        chi2: cv.chi2,
+        df: cv.df,
+        p: cv.p,
+        iv: ivRes.iv,
+        eta2: η2,
+        rho,
+        verdict,
+        bracketStats,
+        basePct: nSuccess / finalRows.length,
+      });
+    });
+  });
+
+  // Sort by Cramér's V descending (strongest signal first)
+  _corrData.sort((a, b) => b.V - a.V);
+
+  // ── Build HTML ───────────────────────────────────────────────────
+  let html = `
+  <div class="corr-hdr">
+    <span class="corr-title">🧮 Statistical Correlation Analysis</span>
+    <span class="corr-baseline">
+      Baseline success rate: <strong>${basePct}%</strong>
+      (${nSuccess} / ${finalRows.length} rows reached ≥${threshold}R on ${esc(outCol)})
+    </span>
+    <div class="export-row">
+      <button class="exp-btn" onclick="exportCorrCSV()">⬇ CSV</button>
+      <button class="exp-btn" onclick="window.print()">🖨 PDF</button>
+    </div>
+  </div>
+
+  <div class="info-box" id="infoBox">
+    <div class="info-box-hdr" onclick="document.getElementById('infoBox').classList.toggle('open')">
+      <span style="font-size:13px">ℹ️</span>
+      <span class="info-box-title">How to interpret these statistics — click to expand</span>
+    </div>
+    <div class="info-box-body">
+      <p>Each row represents one factor. The statistics measure whether that factor's brackets
+      (e.g. "Bullish / Bearish" for regime, "$5–10 / $10–20" for price) produce meaningfully
+      different success rates. <strong>Success</strong> = output ≥ ${threshold}R on <em>${esc(outCol)}</em>.</p>
+      <dl>
+        <dt>Cramér's V</dt>
+        <dd>Strength of association between the factor's brackets and success/fail outcome.
+            Computed from the chi-square statistic on a 2×k contingency table.
+            Range 0–1. <em>V ≥ 0.40 strong · 0.20–0.39 moderate · 0.10–0.19 weak · &lt;0.10 noise.</em></dd>
+        <dt>p-value</dt>
+        <dd>Probability the observed association is due to random chance (Wilson–Hilferty
+            approximation of the chi-square distribution).
+            <em>p &lt; 0.05 = statistically significant · p &lt; 0.001 = very significant.</em></dd>
+        <dt>IV (Information Value)</dt>
+        <dd>Measures how well the factor separates winners from losers using
+            Weight of Evidence (WoE = ln(% winners in bucket / % losers in bucket)).
+            IV = Σ (distrib_winners − distrib_losers) × WoE.
+            <em>&lt;0.02 useless · 0.02–0.09 weak · 0.10–0.29 medium · ≥0.30 strong.</em></dd>
+        <dt>η² (Eta-squared)</dt>
+        <dd>ANOVA effect size: proportion of variance in the raw output value explained
+            by bracket membership. SS_between / SS_total.
+            <em>&lt;0.01 small · 0.01–0.06 medium · ≥0.14 large.</em></dd>
+        <dt>Spearman ρ</dt>
+        <dd>Rank correlation between the raw numeric value and raw output (numeric factors only).
+            Detects monotonic relationships without assuming linearity.
+            <em>|ρ| ≥ 0.5 strong · 0.3–0.5 moderate · &lt;0.3 weak.
+            Positive = higher value → bigger output. Negative = inverse.</em></dd>
+      </dl>
+      <div class="rule-row">
+        <span class="rule-chip" style="background:rgba(74,222,128,.15);color:#4ade80">●● Strong signal</span>
+        <span class="rule-chip" style="background:rgba(251,191,36,.15);color:var(--amber)">● Moderate signal</span>
+        <span class="rule-chip" style="background:rgba(148,163,184,.1);color:var(--muted)">◌ Weak signal</span>
+        <span class="rule-chip" style="background:rgba(100,116,139,.08);color:var(--muted2)">— Noise</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="corr-tbl-wrap">
+  <table class="ctbl">
+  <thead><tr>
+    <th style="text-align:left">Factor</th>
+    <th>Cramér's V</th>
+    <th>p-value</th>
+    <th>IV</th>
+    <th>η²</th>
+    <th>Spearman ρ</th>
+    <th>Verdict</th>
+  </tr></thead>
+  <tbody>`;
+
+  _corrData.forEach((d, i) => {
+    const verdictHtml =
+      d.verdict === 'strong'   ? '<span class="v-strong">●● Strong</span>'
+    : d.verdict === 'moderate' ? '<span class="v-moderate">● Moderate</span>'
+    : d.verdict === 'weak'     ? '<span class="v-weak">◌ Weak</span>'
+    :                            '<span class="v-noise">— Noise</span>';
+
+    const fmtV   = d.V.toFixed(3);
+    const fmtP   = d.p < 0.001 ? '<0.001' : d.p < 0.01 ? d.p.toFixed(3) : d.p.toFixed(2);
+    const fmtIV  = d.iv.toFixed(3);
+    const fmtEta = d.eta2 !== null ? d.eta2.toFixed(3) : '—';
+    const fmtRho = d.rho !== null  ? (d.rho >= 0 ? '+' : '') + d.rho.toFixed(3) : '—';
+
+    const vCls  = d.V   >= 0.40 ? 'stat-hi' : d.V   >= 0.20 ? 'stat-mid' : 'stat-lo';
+    const pCls  = d.p   <  0.05 ? 'stat-hi' : d.p   < 0.10  ? 'stat-mid' : 'stat-lo';
+    const ivCls = d.iv  >= 0.10 ? 'stat-hi' : d.iv  >= 0.02 ? 'stat-mid' : 'stat-lo';
+    const eCls  = d.eta2 !== null
+                  ? (d.eta2 >= 0.14 ? 'stat-hi' : d.eta2 >= 0.01 ? 'stat-mid' : 'stat-lo')
+                  : 'stat-lo';
+    const rhoCls = d.rho !== null
+                  ? (Math.abs(d.rho) >= 0.5 ? (d.rho > 0 ? 'stat-hi' : 'stat-neg')
+                   : Math.abs(d.rho) >= 0.3 ? (d.rho > 0 ? 'stat-mid' : 'stat-neg')
+                   : 'stat-lo')
+                  : 'stat-lo';
+
+    const detailId = `bdet_${i}`;
+
+    html += `<tr onclick="toggleBracketDetail('${detailId}')">
+      <td title="Click to expand bracket detail">${esc(d.factor)} <span style="font-size:9px;color:var(--muted2)">${esc(d.group.replace(/^[^ ]+ /,''))}</span></td>
+      <td class="${vCls}">${fmtV}</td>
+      <td class="${pCls}">${fmtP}</td>
+      <td class="${ivCls}">${fmtIV}</td>
+      <td class="${eCls}">${fmtEta}</td>
+      <td class="${rhoCls}">${fmtRho}</td>
+      <td>${verdictHtml}</td>
+    </tr>
+    <tr><td colspan="7" style="padding:0">
+      <div class="bracket-detail" id="${detailId}">
+        ${bracketDetailHTML(d)}
+      </div>
+    </td></tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  sec.innerHTML = html;
+}
+
+function bracketDetailHTML(d) {
+  if (!d.bracketStats.length) return '<em style="color:var(--muted2)">No bracket data.</em>';
+  const baseRate = d.basePct;
+
+  let h = `<table class="btbl"><thead><tr>
+    <th style="text-align:left">Bracket</th>
+    <th>N</th><th>Success</th><th>Rate</th><th>vs Baseline</th>
+    <th>WoE</th><th>IV contrib</th>
+  </tr></thead><tbody>`;
+
+  d.bracketStats.forEach(b => {
+    const ratePct  = b.rate !== null ? (b.rate * 100).toFixed(1) + '%' : '—';
+    const delta    = b.rate !== null ? b.rate - baseRate : null;
+    const deltaTxt = delta !== null ? (delta >= 0 ? '+' : '') + (delta * 100).toFixed(1) + 'pp' : '—';
+    const deltaCls = delta === null ? '' : delta > 0.1 ? 'stat-hi' : delta < -0.1 ? 'stat-neg' : 'stat-lo';
+    const woeTxt   = isFinite(b.woe) ? (b.woe >= 0 ? '+' : '') + b.woe.toFixed(3) : '—';
+    const woeCls   = b.woe > 0 ? 'woe-pos' : b.woe < 0 ? 'woe-neg' : '';
+    const ivTxt    = isFinite(b.contrib) ? b.contrib.toFixed(4) : '—';
+    const lowData  = b.n < 5 ? ' <span style="font-size:9px;color:var(--muted2)">(low n)</span>' : '';
+
+    h += `<tr>
+      <td>${esc(b.label)}${lowData}</td>
+      <td>${b.n}</td>
+      <td>${b.s}</td>
+      <td>${ratePct}</td>
+      <td class="${deltaCls}">${deltaTxt}</td>
+      <td class="${woeCls}">${woeTxt}</td>
+      <td>${ivTxt}</td>
+    </tr>`;
+  });
+
+  h += '</tbody></table>';
+  return h;
+}
+
+function toggleBracketDetail(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXPORTS
+// ══════════════════════════════════════════════════════════════════
+function exportCorrCSV() {
+  if (!_corrData.length) return;
+  const threshold = parseFloat(document.getElementById('successThreshold').value) || 1.3;
+
+  const headers = ['Group','Factor','Bracket','N','Success','Success%','vs Baseline (pp)',
+                   'WoE','IV Contrib','Cramers_V','Chi2','df','p_value','IV','Eta2','Spearman_rho','Verdict'];
+
+  const rows = [headers.join(',')];
+  _corrData.forEach(d => {
+    d.bracketStats.forEach(b => {
+      const delta = b.rate !== null ? ((b.rate - d.basePct) * 100).toFixed(2) : '';
+      rows.push([
+        csvCell(d.group), csvCell(d.factor), csvCell(b.label),
+        b.n, b.s,
+        b.rate !== null ? (b.rate * 100).toFixed(2) : '',
+        delta,
+        isFinite(b.woe)    ? b.woe.toFixed(4)    : '',
+        isFinite(b.contrib)? b.contrib.toFixed(4) : '',
+        d.V.toFixed(4),
+        d.chi2.toFixed(4),
+        d.df,
+        d.p.toFixed(4),
+        d.iv.toFixed(4),
+        d.eta2 !== null ? d.eta2.toFixed(4) : '',
+        d.rho  !== null ? d.rho.toFixed(4)  : '',
+        d.verdict,
+      ].join(','));
+    });
+  });
+
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'factor_correlation_' + selectedSlot.replace(':','') + '_' + selectedMode + '_thr' + threshold + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  return s.includes(',') || s.includes('"') || s.includes('\n')
+    ? '"' + s.replace(/"/g, '""') + '"'
+    : s;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXTENSION REGISTRY INTEGRATION
+// When running inside the Trade Desk extension, offer direct load
+// from chrome.storage.local without needing a CSV file upload.
+// ══════════════════════════════════════════════════════════════════
+(function detectExtension() {
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    const btn  = document.getElementById('regLoadBtn');
+    const note = document.getElementById('regLoadNote');
+    if (btn)  btn.style.display  = 'inline-block';
+    if (note) note.style.display = 'block';
+  }
+})();
+
+function loadFromRegistry() {
+  if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+    showErr('Extension storage not available — load a CSV file instead.');
+    return;
+  }
+  chrome.storage.local.get(['registry'], function(result) {
+    const reg = result.registry || {};
+    const rows = Object.values(reg);
+    if (!rows.length) {
+      showErr('Registry is empty — run a scan from the Screener tab first.');
+      return;
+    }
+    const mapped = rows.map(registryRowToAnalysisRow);
+    loadData(mapped);
+  });
+}
+
+// Transform a registry row (popup.js format) into a flat analysis row.
+function registryRowToAnalysisRow(r) {
+  const s   = r.stock   || {};
+  const ctx = r.context || {};
+  const keys = (r.screenerKeys || []).join(' / ');
+
+  // snap context: use the stored context for both 9:35 and 9:40 columns
+  // (registry captures a single snapshot; slot-specific snapshots require the merged CSV)
+  const regime  = ctx.regime || ctx.marketBias || '';
+  const lt      = ctx.ltBias  || '';
+  const mt      = ctx.mtBias  || ctx.midTerm || '';
+  const st      = ctx.stBias  || '';
+  const secBias = ctx.secBias || '';
+
+  return {
+    date:        r.date        || '',
+    slot:        r.slot        || '',
+    captured_at: r.firstSeen   ? new Date(r.firstSeen).toISOString() : '',
+    complete:    '',
+    reason:      '',
+    ticker:      r.ticker      || '',
+    tv_symbol:   r.tvSymbol    || '',
+    screeners:   keys,
+    price:       s.price       != null ? String(s.price)       : '',
+    open:        s.open        != null ? String(s.open)        : '',
+    change_pct:  s.change      != null ? String(s.change)      : '',
+    prev_close:  s.prevClose   != null ? String(s.prevClose)   : '',
+    gap_pct:     s.gapPct      != null ? String(s.gapPct)      : '',
+    vwap:        s.vwap        != null ? String(s.vwap)        : '',
+    ema9:        s.ema9        != null ? String(s.ema9)        : '',
+    ema13:       s.ema13       != null ? String(s.ema13)       : '',
+    ema20:       s.ema20       != null ? String(s.ema20)       : '',
+    ema50:       s.ema50       != null ? String(s.ema50)       : '',
+    sma5:        s.sma5        != null ? String(s.sma5)        : '',
+    month_high:  s.monthHigh   != null ? String(s.monthHigh)   : '',
+    month_low:   s.monthLow    != null ? String(s.monthLow)    : '',
+    day_high:    s.dayHigh     != null ? String(s.dayHigh)     : '',
+    day_low:     s.dayLow      != null ? String(s.dayLow)      : '',
+    atr:         s.atr         != null ? String(s.atr)         : '',
+    pm_high:     s.pmHigh      != null ? String(s.pmHigh)      : '',
+    pm_low:      s.pmLow       != null ? String(s.pmLow)       : '',
+    pm_range:    s.pmRange     != null ? String(s.pmRange)     : '',
+    adr_pct:     s.adrPct      != null ? String(s.adrPct)      : '',
+    month_range_pos: s.monthRangePos != null ? String(s.monthRangePos) : '',
+    pm_adr_ratio:    s.pmAdrRatio   != null ? String(s.pmAdrRatio)   : '',
+    mcap:        s.mcap        != null ? String(s.mcap)        : '',
+    float_shares: s.floatShares != null ? String(s.floatShares) : '',
+    short_float: s.shortFloat  != null ? String(s.shortFloat)  : '',
+    rvol:        s.rvol        != null ? String(s.rvol)        : '',
+    sector:      s.sector      || '',
+    industry:    s.industry    || '',
+    st_bias:     st,
+    lt_bias:     lt,
+    lt_label:    lt,
+    mid_term:    mt,
+    mid_term_label: mt,
+    sec_bias:    secBias,
+    sec_score:   ctx.secScore  != null ? String(ctx.secScore)  : '',
+    sec_hot:     ctx.secHot    ? 'true' : 'false',
+    market_bias: ctx.marketBias || '',
+    // Outcome columns — not stored in live registry; require merged CSV with EOD data
+    entry35: '', hh35: '', ll35: '', down_r35: '', up_r35: '',
+    entry40: '', hh40: '', ll40: '', down_r40: '', up_r40: '',
+    eod_atr: '', eod_atr_source: '', last_bar: '', fetched_at: '', eod_status: '',
+    // Snapshot columns — same context used for both slots (registry has one snapshot)
+    snap935_lt: lt,  snap935_mt: mt,  snap935_st: st,  snap935_regime: regime,  snap935_sec_bias: secBias,
+    snap940_lt: lt,  snap940_mt: mt,  snap940_st: st,  snap940_regime: regime,  snap940_sec_bias: secBias,
+  };
+}
+
+// loadData accepts either a CSV text string OR a pre-built array of row objects.
+const _origLoadData = loadData;
+// Override to accept objects array directly (from registry)
+function loadData(input) {
+  try {
+    let rows;
+    if (typeof input === 'string') {
+      rows = parseCSV(input);
+    } else if (Array.isArray(input)) {
+      rows = input;
+    } else {
+      showErr('Unknown data format.'); return;
+    }
+    if (!rows.length) { showErr('No records found.'); return; }
+    clearErr();
+    allRows = rows;
+    document.getElementById('uploadZone').style.display = 'none';
+    document.getElementById('controlsBar').style.display = 'flex';
+    document.getElementById('summaryBar').style.display = 'flex';
+    document.getElementById('runBtn').disabled = false;
+    buildRegimeChecks();
+    runAnalysis();
+  } catch(e) {
+    showErr('Failed to load data: ' + e.message);
+  }
+}
+</script>
+</body>
+</html>

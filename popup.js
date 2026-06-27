@@ -3161,6 +3161,18 @@ function initTabs() {
       if (pane === 'pane-registry') { renderRegistryTable(); renderAllRegisters(); }
     });
   });
+
+  // Analysis tab: sub-tab switching (Journal ↔ Factor Analysis)
+  Array.prototype.forEach.call(document.querySelectorAll('.atab'), function (t) {
+    t.addEventListener('click', function () {
+      document.querySelectorAll('.atab').forEach(function (x) { x.classList.remove('active'); });
+      document.querySelectorAll('.atab-pane').forEach(function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      var target = t.getAttribute('data-atab');
+      var el = document.getElementById(target);
+      if (el) el.classList.add('active');
+    });
+  });
 }
 
 // Delegated handler for the per-card "Load news" buttons (cards are re-rendered).
