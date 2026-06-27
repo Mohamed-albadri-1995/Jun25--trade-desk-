@@ -1509,7 +1509,7 @@ function importFrozenScreenerJson(file) {
 //   st_bias, lt_bias, lt_label, mid_term, mid_term_label,
 //   sec_bias, sec_score, sec_hot, market_bias
 var REG1_CSV_HEADERS = [
-  'date','slot','captured_at','complete','reason',
+  'date','slot','captured_at','last_refreshed_at','complete','reason',
   'ticker','tv_symbol','screeners',
   'price','open','change_pct','prev_close','gap_pct','vwap',
   'ema9','ema13','ema20','ema50','sma5',
@@ -1530,6 +1530,7 @@ function exportFrozenScreenerCsv() {
       var r = entry.rows[ticker], s = r.stock || {}, ctx = r.context || {};
       return {
         date: date, slot: entry.slot || '09:35', captured_at: entry.capturedAt || '',
+        last_refreshed_at: r.lastUpdated ? new Date(r.lastUpdated).toISOString() : '',
         complete: entry.complete ? 'true' : 'false', reason: entry.reason || '',
         ticker: ticker, tv_symbol: s.tvSymbol || r.tvSymbol || '',
         screeners: (r.screenerKeys || []).join('|'),
@@ -1899,7 +1900,7 @@ function importEodOutcomeCsv(file) {
 
 var MERGED_CSV_HEADERS = [
   // R1 day-level meta
-  'date','slot','captured_at','complete','reason',
+  'date','slot','captured_at','last_refreshed_at','complete','reason',
   // R1 stock identity
   'ticker','tv_symbol','screeners',
   // R1 price / technicals
@@ -2032,6 +2033,7 @@ function exportMergedRegisterCsv() {
         var sb940 = snap940 && snap940.sectors && snap940.sectors[sec] ? snap940.sectors[sec].bias : '';
         rows.push({
           date: date, slot: r1Day.slot || '', captured_at: r1Day.capturedAt || '',
+          last_refreshed_at: row.lastUpdated ? new Date(row.lastUpdated).toISOString() : '',
           complete: r1Day.complete ? 'true' : 'false', reason: r1Day.reason || '',
           ticker: ticker, tv_symbol: st.tvSymbol || row.tvSymbol || '',
           screeners: (row.screenerKeys || []).join('|'),
@@ -2851,8 +2853,32 @@ async function runAllScreeners() {
     Object.keys(byTicker).forEach(function (t) {
       liveStocks.push(byTicker[t].stock); keysByTicker[t] = byTicker[t].keys; liveSet[t] = true;
     });
-    // registry-first: record live now → refresh earlier-today candidates → render from registry
+    // registry-first: record live now → enrich opens from Yahoo → refresh stale → render
     registryUpsertLive(liveStocks, keysByTicker);
+    // Fetch correct session opens from Yahoo (TV scanner returns previous day's open at 09:35)
+    try {
+      var openResp = await fetch('/api/opens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers: liveStocks.map(function(s) { return s.ticker; }) })
+      });
+      if (openResp.ok) {
+        var opens = await openResp.json();
+        liveStocks.forEach(function(s) {
+          var yOpen = opens[s.ticker];
+          if (yOpen != null && yOpen > 0) {
+            s.open = yOpen;
+            if (s.prevClose != null && s.prevClose > 0)
+              s.gapPct = (yOpen - s.prevClose) / s.prevClose * 100;
+          } else {
+            // null = before 09:30 ET or Yahoo error — show nothing rather than wrong value
+            s.open = null;
+            s.gapPct = null;
+          }
+        });
+        registryUpsertLive(liveStocks, keysByTicker);
+      }
+    } catch (_) {}  // best-effort — scan still works if Yahoo is unreachable
     var refreshed = await registryRefreshStale(liveSet);
     await saveRegistry();
     var shown = renderScreenerFromRegistry();

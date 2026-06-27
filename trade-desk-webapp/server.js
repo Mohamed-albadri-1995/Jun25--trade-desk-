@@ -1097,6 +1097,23 @@ app.get('/api/profile/:ticker', async (req, res) => {
   res.json({ sector: '', industry: '' });
 });
 
+// ── Batch open-price fetch (Yahoo Finance first 09:30 bar) ──────────────
+app.post('/api/opens', async (req, res) => {
+  const tickers = (req.body && Array.isArray(req.body.tickers)) ? req.body.tickers : [];
+  if (!tickers.length) return res.json({});
+  const results = await Promise.all(tickers.map(async (ticker) => {
+    try {
+      const bars = await fetchYahooIntraday(ticker, Date.now() - 86400000, Date.now(), 1);
+      if (!bars || !bars.length) return [ticker, null];
+      const openBar = bars.find(b => b.hhmm >= '09:30');
+      return [ticker, openBar ? openBar.open : null];
+    } catch (_) { return [ticker, null]; }
+  }));
+  const out = {};
+  results.forEach(([t, v]) => { out[t] = v; });
+  res.json(out);
+});
+
 // ── News proxy (Finnhub + Yahoo Finance + SEC EDGAR) ─────────────
 app.get('/api/news/:ticker', async (req, res) => {
   const ticker = req.params.ticker;
