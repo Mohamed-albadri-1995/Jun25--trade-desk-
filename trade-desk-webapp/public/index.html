@@ -777,48 +777,55 @@
     <div class="h1">⚙ Settings</div>
 
     <div class="section">
-      <div class="section-hdr">🔥 Hot Sector Thresholds</div>
-      <div class="set-help">A sector turns <b>🔥 HOT</b> when its score reaches the <b>immediate</b> threshold instantly, or holds at/above the <b>sustained</b> threshold for the set number of <b>sessions</b> (one session = one trading day you refresh). Once hot, it <b>stays hot</b> as long as its score holds above the <b>floor</b> — it only cools off after sitting <b>below the floor for more than</b> the set number of cooling sessions. So a normal pullback won't un-hot a leader; only a real breakdown will.</div>
-      <div class="set-field"><label>Immediate threshold — instant HOT (default 80)</label><input id="setHotImm" type="number" min="0" max="100" step="1"></div>
-      <div class="set-field"><label>Sustained threshold (default 65)</label><input id="setHotSus" type="number" min="0" max="100" step="1"></div>
-      <div class="set-field"><label>Sustained sessions to enter HOT (default 2)</label><input id="setHotDays" type="number" min="1" max="14" step="1"></div>
-      <div class="set-field"><label>Stay-hot floor — stays HOT while score ≥ this (default 40)</label><input id="setHotFloor" type="number" min="0" max="100" step="1"></div>
-      <div class="set-field"><label>Cooling sessions — drop HOT after below the floor for more than this (default 2)</label><input id="setHotCool" type="number" min="1" max="14" step="1"></div>
+      <details>
+        <summary class="section-hdr" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">🔥 Hot Sector Thresholds <span style="font-size:10px;color:var(--muted)">▸</span></summary>
+        <div class="set-help">A sector turns <b>🔥 HOT</b> when its score reaches the <b>immediate</b> threshold instantly, or holds at/above the <b>sustained</b> threshold for the set number of <b>sessions</b> (one session = one trading day you refresh). Once hot, it <b>stays hot</b> as long as its score holds above the <b>floor</b> — it only cools off after sitting <b>below the floor for more than</b> the set number of cooling sessions. So a normal pullback won't un-hot a leader; only a real breakdown will.</div>
+        <div class="set-field"><label>Immediate threshold — instant HOT (default 80)</label><input id="setHotImm" type="number" min="0" max="100" step="1"></div>
+        <div class="set-field"><label>Sustained threshold (default 65)</label><input id="setHotSus" type="number" min="0" max="100" step="1"></div>
+        <div class="set-field"><label>Sustained sessions to enter HOT (default 2)</label><input id="setHotDays" type="number" min="1" max="14" step="1"></div>
+        <div class="set-field"><label>Stay-hot floor — stays HOT while score ≥ this (default 40)</label><input id="setHotFloor" type="number" min="0" max="100" step="1"></div>
+        <div class="set-field"><label>Cooling sessions — drop HOT after below the floor for more than this (default 2)</label><input id="setHotCool" type="number" min="1" max="14" step="1"></div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn btn-primary" id="setSave">💾 Save</button>
+          <button class="btn" id="setReset">↩ Reset thresholds</button>
+          <button class="btn btn-ghost" id="setClearHist">🗑 Clear hot history</button>
+        </div>
+        <div class="status" id="setStatus"></div>
+      </details>
     </div>
 
     <div class="section">
-      <div class="section-hdr">📰 News — Finnhub API Key</div>
-      <div class="set-help">Used to pull company-news <b>summaries</b> onto screener cards. Grab a free key at finnhub.io (60 calls/min on the free tier). TradingView headlines are fetched without a key on a best-effort basis (unofficial endpoint, titles + links only). News loads per-card on demand to stay within the rate limit.</div>
-      <div class="set-toggle"><label><input id="setFinnhubNews" type="checkbox"> Include Finnhub news on cards (in addition to TradingView)</label></div>
-      <div class="set-field"><label>Finnhub API key</label><input id="setFinnhub" type="password" placeholder="paste key…" autocomplete="off" spellcheck="false"></div>
+      <details>
+        <summary class="section-hdr" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">📰 News — Finnhub API Key <span style="font-size:10px;color:var(--muted)">▸</span></summary>
+        <div class="set-help">Used to pull company-news <b>summaries</b> onto screener cards. Grab a free key at finnhub.io (60 calls/min on the free tier). TradingView headlines are fetched without a key on a best-effort basis (unofficial endpoint, titles + links only). News loads per-card on demand to stay within the rate limit.</div>
+        <div class="set-toggle"><label><input id="setFinnhubNews" type="checkbox"> Include Finnhub news on cards (in addition to TradingView)</label></div>
+        <div class="set-field"><label>Finnhub API key</label><input id="setFinnhub" type="password" placeholder="paste key…" autocomplete="off" spellcheck="false"></div>
+      </details>
     </div>
 
     <div class="section">
-      <div class="section-hdr">📸 Snapshot Mode</div>
-      <div class="set-help">Controls how the <b>Market Snapshots</b> (Register 2) and <b>Frozen Screener</b> (Register 1) are captured. In <b>Manual</b> mode you press the buttons on the Market and Screener tabs within ±5 min of each slot. In <b>Auto</b> mode the background service worker captures automatically at 09:30–10:00 ET every weekday — you still need the popup open for the frozen screener (it reads from live memory).</div>
-      <div class="set-field">
-        <label>Capture mode</label>
-        <select id="setSnapMode">
-          <option value="manual">Manual — press buttons to capture</option>
-          <option value="auto">Auto — capture at 09:30–10:00 ET automatically</option>
-        </select>
-      </div>
+      <details>
+        <summary class="section-hdr" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">📸 Snapshot Mode <span style="font-size:10px;color:var(--muted)">▸</span></summary>
+        <div class="set-help">Controls how the <b>Market Snapshots</b> (Register 2) and <b>Frozen Screener</b> (Register 1) are captured. In <b>Manual</b> mode you press the buttons on the Market and Screener tabs within ±5 min of each slot. In <b>Auto</b> mode the background service worker captures automatically at 09:30–10:00 ET every weekday — you still need the popup open for the frozen screener (it reads from live memory).</div>
+        <div class="set-field">
+          <label>Capture mode</label>
+          <select id="setSnapMode">
+            <option value="manual">Manual — press buttons to capture</option>
+            <option value="auto">Auto — capture at 09:30–10:00 ET automatically</option>
+          </select>
+        </div>
+      </details>
     </div>
-
-    <div class="row">
-      <button class="btn btn-primary" id="setSave">💾 Save</button>
-      <button class="btn" id="setReset">↩ Reset thresholds</button>
-      <button class="btn btn-ghost" id="setClearHist">🗑 Clear hot history</button>
-    </div>
-    <div class="status" id="setStatus"></div>
 
     <div class="section">
-      <div class="section-hdr">💾 Data Backup</div>
-      <div class="set-help">Download a full JSON snapshot of all registers (R1 Screener, R2 Snapshots, R3 EOD, R0 Registry, Journal) for safekeeping. The server also auto-exports to <code>backups/YYYY-MM-DD/</code> at 16:30 ET daily.</div>
-      <div class="row">
-        <button class="btn btn-ghost" id="btnExportAll">⬇ Export All Data</button>
-        <span class="snap-io-status" id="exportAllStatus"></span>
-      </div>
+      <details>
+        <summary class="section-hdr" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">💾 Data Backup <span style="font-size:10px;color:var(--muted)">▸</span></summary>
+        <div class="set-help">Download a full JSON snapshot of all registers (R1 Screener, R2 Snapshots, R3 EOD, R0 Registry, Journal) for safekeeping. The server also auto-exports to <code>backups/YYYY-MM-DD/</code> at 16:30 ET daily.</div>
+        <div class="row">
+          <button class="btn btn-ghost" id="btnExportAll">⬇ Export All Data</button>
+          <span class="snap-io-status" id="exportAllStatus"></span>
+        </div>
+      </details>
     </div>
   </div>
 
