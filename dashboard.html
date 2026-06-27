@@ -168,7 +168,7 @@ table.ftbl tr:hover td{background:rgba(148,163,184,.05)}
 <div id="summaryBar" class="summary" style="display:none">
   <div class="sum-block"><div class="sum-val" id="sTotal">—</div><div class="sum-lbl">Total rows</div></div>
   <div class="sum-arrow">→</div>
-  <div class="sum-block"><div class="sum-val" id="sSlot">—</div><div class="sum-lbl">After slot filter</div></div>
+  <div class="sum-block"><div class="sum-val" id="sSlot">—</div><div class="sum-lbl">Rows with valid output</div></div>
   <div class="sum-arrow">→</div>
   <div class="sum-block"><div class="sum-val" id="sRegime">—</div><div class="sum-lbl">After regime filter</div></div>
   <div class="sum-arrow">→</div>
@@ -337,51 +337,61 @@ function buildRegimeChecks() {
 // ══════════════════════════════════════════════════════════════════
 // MAIN ANALYSIS
 // ══════════════════════════════════════════════════════════════════
+//
+// IMPORTANT: The slot selector is a COLUMN selector, NOT a row filter.
+// Every row in the CSV has both entry35/hh35/ll35/up_r35/down_r35
+// AND entry40/hh40/ll40/up_r40/down_r40. Choosing 9:35 means
+// "read the 35 columns for ALL rows". No rows are excluded by slot.
+// "Both" processes every row twice — once with 35 columns, once with 40.
+//
+function makeWorkingRow(row, suffix, snapPfx) {
+  const upR   = parseFloat(row['up_r'   + suffix]);
+  const downR = parseFloat(row['down_r' + suffix]);
+  if (!isFinite(upR) || !isFinite(downR)) return null; // missing outcome data
+  const output = selectedMode === 'up'   ? upR
+               : selectedMode === 'down' ? downR
+               : Math.max(upR, downR);
+  return {
+    ...row,
+    _entrySlot: suffix === '35' ? '09:35' : '09:40',
+    _upR:     upR,
+    _downR:   downR,
+    _output:  output,
+    _regime:  row[snapPfx + '_regime']   || '',
+    _lt:      row[snapPfx + '_lt']       || '',
+    _mt:      row[snapPfx + '_mt']       || '',
+    _st:      row[snapPfx + '_st']       || '',
+    _secBias: row[snapPfx + '_sec_bias'] || '',
+  };
+}
+
 function runAnalysis() {
   const noisePct = Math.max(5, Math.min(49, parseInt(document.getElementById('noisePct').value)||30));
 
-  // Step 1: slot filter — attach effective output fields to each row
+  // Step 1: build working set — column selection, NOT row filtering.
+  // Every row gets the correct output columns based on the slot choice.
+  // "Both" = each row appears twice (as a 9:35 entry AND a 9:40 entry).
   let working = [];
   allRows.forEach(row => {
-    const rowSlot = (row.slot || '').trim();
-    if (selectedSlot !== 'both' && rowSlot !== selectedSlot) return;
-
-    // Pick the right columns based on the row's own slot
-    const suffix  = rowSlot === '09:35' ? '35' : '40';
-    const snapPfx = rowSlot === '09:35' ? 'snap935' : 'snap940';
-
-    const upR   = parseFloat(row['up_r'   + suffix]);
-    const downR = parseFloat(row['down_r' + suffix]);
-
-    if (!isFinite(upR) || !isFinite(downR)) return; // no outcome data
-
-    const output = selectedMode === 'up'   ? upR
-                 : selectedMode === 'down' ? downR
-                 : Math.max(upR, downR);
-
-    working.push({
-      ...row,
-      _slot:    rowSlot,
-      _upR:     upR,
-      _downR:   downR,
-      _output:  output,
-      _regime:  row[snapPfx + '_regime'] || '',
-      _lt:      row[snapPfx + '_lt']     || '',
-      _mt:      row[snapPfx + '_mt']     || '',
-      _st:      row[snapPfx + '_st']     || '',
-      _secBias: row[snapPfx + '_sec_bias'] || '',
-    });
+    if (selectedSlot === '09:35' || selectedSlot === 'both') {
+      const r = makeWorkingRow(row, '35', 'snap935');
+      if (r) working.push(r);
+    }
+    if (selectedSlot === '09:40' || selectedSlot === 'both') {
+      const r = makeWorkingRow(row, '40', 'snap940');
+      if (r) working.push(r);
+    }
   });
 
   const afterSlot = working.length;
 
-  // Step 2: regime filter
+  // Step 2: regime filter (uses the snapshot context matching the chosen slot)
   if (selectedRegimes.size < availableRegimes.length) {
     working = working.filter(r => selectedRegimes.has(r._regime));
   }
   const afterRegime = working.length;
 
-  // Step 3: output computed
+  // Step 3: all remaining rows have a valid output value
   const afterOutput = working.length;
 
   // Step 4: noise cut — keep top N% and bottom N%
@@ -403,19 +413,19 @@ function runAnalysis() {
   const strip = document.getElementById('colStrip');
   strip.style.display = 'flex';
   if (selectedSlot === 'both') {
-    document.getElementById('colSlot').textContent  = 'Both (each row uses its own slot)';
-    document.getElementById('colEntry').textContent = 'entry35 or entry40';
-    document.getElementById('colHH').textContent    = 'hh35 or hh40';
-    document.getElementById('colLL').textContent    = 'll35 or ll40';
+    document.getElementById('colSlot').textContent  = 'Both — all rows × 2 (9:35 columns + 9:40 columns)';
+    document.getElementById('colEntry').textContent = 'entry35 AND entry40';
+    document.getElementById('colHH').textContent    = 'hh35 AND hh40';
+    document.getElementById('colLL').textContent    = 'll35 AND ll40';
     document.getElementById('colOut').textContent   =
-      selectedMode === 'up'   ? 'up_r35 / up_r40'
-    : selectedMode === 'down' ? 'down_r35 / down_r40'
-    : 'max(up_r35,down_r35) / max(up_r40,down_r40)';
-    document.getElementById('colSnap').textContent = 'snap935_* or snap940_*';
+      selectedMode === 'up'   ? 'up_r35 + up_r40'
+    : selectedMode === 'down' ? 'down_r35 + down_r40'
+    : 'max(up_r35,down_r35) + max(up_r40,down_r40)';
+    document.getElementById('colSnap').textContent = 'snap935_* + snap940_*';
   } else {
     const sfx  = selectedSlot === '09:35' ? '35'      : '40';
     const snap = selectedSlot === '09:35' ? 'snap935' : 'snap940';
-    document.getElementById('colSlot').textContent  = selectedSlot + ' only (excludes ' + (sfx==='35'?'09:40':'09:35') + ' rows)';
+    document.getElementById('colSlot').textContent  = 'All ' + allRows.length + ' rows · reading ' + selectedSlot + ' columns only';
     document.getElementById('colEntry').textContent = 'entry' + sfx;
     document.getElementById('colHH').textContent    = 'hh' + sfx;
     document.getElementById('colLL').textContent    = 'll' + sfx;
