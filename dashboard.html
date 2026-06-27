@@ -270,23 +270,12 @@ function loadData(text) {
     if (!allRows.length) { showErr('CSV appears empty.'); return; }
     clearErr();
 
-    // detect available regimes from both snapshot columns
-    const regSet = new Set();
-    allRows.forEach(r => {
-      ['snap935_regime','snap940_regime'].forEach(col => {
-        const v = r[col]; if (v && v !== '' && v !== 'null') regSet.add(v);
-      });
-    });
-    availableRegimes = [...regSet].sort();
-    selectedRegimes = new Set(availableRegimes); // default: all selected
-
-    buildRegimeChecks();
     document.getElementById('uploadZone').style.display = 'none';
     document.getElementById('controlsBar').style.display = 'flex';
     document.getElementById('summaryBar').style.display = 'flex';
     document.getElementById('runBtn').disabled = false;
 
-    // auto-run
+    buildRegimeChecks(); // builds from currently selected slot
     runAnalysis();
   } catch(e) {
     showErr('Failed to parse CSV: ' + e.message);
@@ -301,6 +290,9 @@ document.querySelectorAll('[data-slot]').forEach(btn => {
     document.querySelectorAll('[data-slot]').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
     selectedSlot = btn.dataset.slot;
+    // Regime options come from the snapshot columns that match the chosen slot —
+    // rebuild the checkboxes so only relevant regimes are shown.
+    if (allRows.length) buildRegimeChecks();
   });
 });
 document.querySelectorAll('[data-mode]').forEach(btn => {
@@ -316,20 +308,38 @@ document.getElementById('noisePct').addEventListener('input', function() {
 });
 document.getElementById('runBtn').addEventListener('click', runAnalysis);
 
+// Build regime checkboxes from the snapshot column(s) that match the current slot.
+// 9:35 → snap935_regime only
+// 9:40 → snap940_regime only
+// both → union of both
 function buildRegimeChecks() {
+  const cols = selectedSlot === '09:35' ? ['snap935_regime']
+             : selectedSlot === '09:40' ? ['snap940_regime']
+             : ['snap935_regime', 'snap940_regime'];
+
+  const regSet = new Set();
+  allRows.forEach(r => {
+    cols.forEach(col => {
+      const v = (r[col] || '').trim();
+      if (v && v !== 'null') regSet.add(v);
+    });
+  });
+  availableRegimes  = [...regSet].sort();
+  selectedRegimes   = new Set(availableRegimes); // default: all selected
+
   const host = document.getElementById('regimeChecks');
   host.innerHTML = '';
-  availableRegimes.forEach(r => {
+  availableRegimes.forEach(regime => {
     const lbl = document.createElement('label');
     lbl.className = 'chk-item on';
     const inp = document.createElement('input');
-    inp.type = 'checkbox'; inp.checked = true; inp.value = r;
+    inp.type = 'checkbox'; inp.checked = true; inp.value = regime;
     inp.addEventListener('change', () => {
-      if (inp.checked) selectedRegimes.add(r); else selectedRegimes.delete(r);
+      if (inp.checked) selectedRegimes.add(regime); else selectedRegimes.delete(regime);
       lbl.classList.toggle('on', inp.checked);
     });
     lbl.appendChild(inp);
-    lbl.appendChild(document.createTextNode(' ' + r));
+    lbl.appendChild(document.createTextNode(' ' + regime));
     host.appendChild(lbl);
   });
 }
