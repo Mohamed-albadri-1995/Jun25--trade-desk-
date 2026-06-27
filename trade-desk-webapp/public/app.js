@@ -2918,12 +2918,32 @@ function renderScreenerFromRegistry() {
   registrySyncShortlist(); // stamp inShortlist from shortlist store before any card builds
   var rows = regTodayRows();
   // Attach score to each row using the current scoring model
+  var scoredCount = 0;
   rows.forEach(function(row) {
     row._score = (typeof scoreCard === 'function') ? scoreCard(row, _scoringModel) : null;
+    if (row._score != null) scoredCount++;
   });
+
+  // Model status banner
+  var modelBanner = $('scrModelBanner');
+  if (modelBanner) {
+    if (!_scoringModel) {
+      modelBanner.innerHTML = '<span style="color:#475569">⚪ No scoring model — save one from Analysis → Factor Analysis</span>';
+      modelBanner.style.display = 'block';
+    } else {
+      var mf = _scoringModel.factors ? _scoringModel.factors.length : 0;
+      var mt = (_scoringModel.slot || '') + ' · ' + (_scoringModel.mode || '') + ' · ' + (_scoringModel.threshold || '') + 'R · ' + mf + ' factors · ' + (_scoringModel.verdictFilter || '');
+      var colour = scoredCount > 0 ? '#4ade80' : '#fbbf24';
+      var warn = (scoredCount === 0 && rows.length > 0)
+        ? ' ⚠ 0/' + rows.length + ' cards scored — load market data first'
+        : ' · ' + scoredCount + '/' + rows.length + ' cards scored';
+      modelBanner.innerHTML = '<span style="color:' + colour + '">● Model: ' + esc(mt) + warn + '</span>';
+      modelBanner.style.display = 'block';
+    }
+  }
+
   rows.sort(function (a, b) {
     if (a.liveNow !== b.liveNow) return a.liveNow ? -1 : 1;
-    // Score desc (null scores sort last)
     var sa = a._score != null ? a._score : -1, sb = b._score != null ? b._score : -1;
     if (sa !== sb) return sb - sa;
     if (b.screenerKeys.length !== a.screenerKeys.length) return b.screenerKeys.length - a.screenerKeys.length;
