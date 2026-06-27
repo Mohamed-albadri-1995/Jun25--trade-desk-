@@ -129,7 +129,6 @@ table.ftbl tr:hover td{background:rgba(148,163,184,.05)}
     <div class="btn-group">
       <button class="btn-tog on" data-slot="09:35">9:35</button>
       <button class="btn-tog" data-slot="09:40">9:40</button>
-      <button class="btn-tog" data-slot="both">Both</button>
     </div>
   </div>
 
@@ -308,14 +307,9 @@ document.getElementById('noisePct').addEventListener('input', function() {
 });
 document.getElementById('runBtn').addEventListener('click', runAnalysis);
 
-// Build regime checkboxes from the snapshot column(s) that match the current slot.
-// 9:35 → snap935_regime only
-// 9:40 → snap940_regime only
-// both → union of both
+// Build regime checkboxes from the snapshot column matching the current slot.
 function buildRegimeChecks() {
-  const cols = selectedSlot === '09:35' ? ['snap935_regime']
-             : selectedSlot === '09:40' ? ['snap940_regime']
-             : ['snap935_regime', 'snap940_regime'];
+  const cols = selectedSlot === '09:35' ? ['snap935_regime'] : ['snap940_regime'];
 
   const regSet = new Set();
   allRows.forEach(r => {
@@ -348,16 +342,25 @@ function buildRegimeChecks() {
 // MAIN ANALYSIS
 // ══════════════════════════════════════════════════════════════════
 //
-// IMPORTANT: The slot selector is a COLUMN selector, NOT a row filter.
-// Every row in the CSV has both entry35/hh35/ll35/up_r35/down_r35
-// AND entry40/hh40/ll40/up_r40/down_r40. Choosing 9:35 means
-// "read the 35 columns for ALL rows". No rows are excluded by slot.
-// "Both" processes every row twice — once with 35 columns, once with 40.
+// Slot is a COLUMN selector. Every CSV row has both 35 and 40 columns.
+// Choosing 9:35 means: read entry35/hh35/ll35/up_r35/down_r35 and snap935_* for ALL rows.
+// Choosing 9:40 means: read entry40/hh40/ll40/up_r40/down_r40 and snap940_* for ALL rows.
+//
+// 6 combinations (2 slots × 3 modes) → output column:
+//   9:35 × Up    → up_r35
+//   9:35 × Down  → down_r35
+//   9:35 × Max   → max(up_r35, down_r35)
+//   9:40 × Up    → up_r40
+//   9:40 × Down  → down_r40
+//   9:40 × Max   → max(up_r40, down_r40)
 //
 function makeWorkingRow(row, suffix, snapPfx) {
   const upR   = parseFloat(row['up_r'   + suffix]);
   const downR = parseFloat(row['down_r' + suffix]);
-  if (!isFinite(upR) || !isFinite(downR)) return null; // missing outcome data
+  // Only require the column(s) actually needed for the chosen mode.
+  if (selectedMode === 'up'   && !isFinite(upR))   return null;
+  if (selectedMode === 'down' && !isFinite(downR))  return null;
+  if (selectedMode === 'max'  && (!isFinite(upR) || !isFinite(downR))) return null;
   const output = selectedMode === 'up'   ? upR
                : selectedMode === 'down' ? downR
                : Math.max(upR, downR);
@@ -378,19 +381,13 @@ function makeWorkingRow(row, suffix, snapPfx) {
 function runAnalysis() {
   const noisePct = Math.max(5, Math.min(49, parseInt(document.getElementById('noisePct').value)||30));
 
-  // Step 1: build working set — column selection, NOT row filtering.
-  // Every row gets the correct output columns based on the slot choice.
-  // "Both" = each row appears twice (as a 9:35 entry AND a 9:40 entry).
+  // Step 1: column selection — read the suffix matching the chosen slot for ALL rows.
+  const suffix  = selectedSlot === '09:35' ? '35'      : '40';
+  const snapPfx = selectedSlot === '09:35' ? 'snap935' : 'snap940';
   let working = [];
   allRows.forEach(row => {
-    if (selectedSlot === '09:35' || selectedSlot === 'both') {
-      const r = makeWorkingRow(row, '35', 'snap935');
-      if (r) working.push(r);
-    }
-    if (selectedSlot === '09:40' || selectedSlot === 'both') {
-      const r = makeWorkingRow(row, '40', 'snap940');
-      if (r) working.push(r);
-    }
+    const r = makeWorkingRow(row, suffix, snapPfx);
+    if (r) working.push(r);
   });
 
   const afterSlot = working.length;
@@ -410,41 +407,30 @@ function runAnalysis() {
   const cut = Math.round(n * noisePct / 100);
   const final = n > 0 ? sorted.filter((_,i) => i < cut || i >= n - cut) : [];
 
+  // Resolve the active output column name for the current combination
+  const snap   = selectedSlot === '09:35' ? 'snap935' : 'snap940';
+  const outCol = selectedMode === 'up'   ? 'up_r'   + suffix
+               : selectedMode === 'down' ? 'down_r' + suffix
+               : 'max(up_r' + suffix + ', down_r' + suffix + ')';
+  const modeLabel = selectedMode === 'up' ? '↑ Up R' : selectedMode === 'down' ? '↓ Down R' : '⬆⬇ Max R';
+
   // Update summary
   document.getElementById('sTotal').textContent  = allRows.length;
   document.getElementById('sSlot').textContent   = afterSlot;
   document.getElementById('sRegime').textContent = afterRegime;
   document.getElementById('sOutput').textContent = afterOutput;
   document.getElementById('sFinal').textContent  = final.length;
-  const modeLabel = selectedMode === 'up' ? '↑ Up R (H−E/ATR)' : selectedMode === 'down' ? '↓ Down R (E−L/ATR)' : '⬆⬇ Max R';
-  document.getElementById('sOutputMode').textContent = 'Mode: ' + modeLabel + ' · Noise cut: ±' + noisePct + '%';
+  document.getElementById('sOutputMode').textContent =
+    'Combination: ' + selectedSlot + ' × ' + modeLabel + ' → ' + outCol + ' · Noise cut: ±' + noisePct + '%';
 
   // Update active-columns confirmation strip
-  const strip = document.getElementById('colStrip');
-  strip.style.display = 'flex';
-  if (selectedSlot === 'both') {
-    document.getElementById('colSlot').textContent  = 'Both — all rows × 2 (9:35 columns + 9:40 columns)';
-    document.getElementById('colEntry').textContent = 'entry35 AND entry40';
-    document.getElementById('colHH').textContent    = 'hh35 AND hh40';
-    document.getElementById('colLL').textContent    = 'll35 AND ll40';
-    document.getElementById('colOut').textContent   =
-      selectedMode === 'up'   ? 'up_r35 + up_r40'
-    : selectedMode === 'down' ? 'down_r35 + down_r40'
-    : 'max(up_r35,down_r35) + max(up_r40,down_r40)';
-    document.getElementById('colSnap').textContent = 'snap935_* + snap940_*';
-  } else {
-    const sfx  = selectedSlot === '09:35' ? '35'      : '40';
-    const snap = selectedSlot === '09:35' ? 'snap935' : 'snap940';
-    document.getElementById('colSlot').textContent  = 'All ' + allRows.length + ' rows · reading ' + selectedSlot + ' columns only';
-    document.getElementById('colEntry').textContent = 'entry' + sfx;
-    document.getElementById('colHH').textContent    = 'hh' + sfx;
-    document.getElementById('colLL').textContent    = 'll' + sfx;
-    document.getElementById('colOut').textContent   =
-      selectedMode === 'up'   ? 'up_r'   + sfx
-    : selectedMode === 'down' ? 'down_r' + sfx
-    : 'max(up_r' + sfx + ', down_r' + sfx + ')';
-    document.getElementById('colSnap').textContent = snap + '_*';
-  }
+  document.getElementById('colStrip').style.display = 'flex';
+  document.getElementById('colSlot').textContent  = selectedSlot + ' columns · all ' + allRows.length + ' rows';
+  document.getElementById('colEntry').textContent = 'entry' + suffix;
+  document.getElementById('colHH').textContent    = 'hh' + suffix;
+  document.getElementById('colLL').textContent    = 'll' + suffix;
+  document.getElementById('colOut').textContent   = outCol;
+  document.getElementById('colSnap').textContent  = snap + '_*';
 
   // Render
   renderAllFactors(final);
