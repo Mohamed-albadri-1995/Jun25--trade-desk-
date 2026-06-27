@@ -397,13 +397,19 @@ function runAnalysis() {
 // ══════════════════════════════════════════════════════════════════
 function pf(row, col) { return parseFloat(row[col]); }
 
-// Numeric bracket helpers
+// Numeric bracket helpers — always returns ALL defined brackets (even empty ones)
+// so gaps in the data don't silently disappear from the table.
 function numBrackets(get, brackets) {
   return function(rows) {
-    return brackets.map(b => ({
+    const result = brackets.map(b => ({
       label: b.label,
-      rows: rows.filter(r => { const v = get(r); return isFinite(v) && b.test(v); })
+      rows: rows.filter(r => { const v = get(r); return isFinite(v) && b.test(v); }),
+      _numericPlaceholder: true
     }));
+    // append N/A bucket for rows where the value is missing/non-numeric
+    const naRows = rows.filter(r => !isFinite(get(r)));
+    if (naRows.length) result.push({ label: 'N/A (missing)', rows: naRows, _numericPlaceholder: true });
+    return result;
   };
 }
 // Categorical bracket helper
@@ -628,16 +634,25 @@ function heatClass(pct, colPcts) {
 
 function renderFactor(factor, allFilteredRows) {
   const brackets = factor.fn(allFilteredRows);
-  const validBrackets = brackets.filter(b => b.rows.length > 0);
-  if (!validBrackets.length) return '<div style="color:var(--muted2);font-size:11px;padding:6px 0">No data for this factor.</div>';
 
-  const statsArr = validBrackets.map(b => computeBracketStats(b.rows));
+  // For numeric factors: show ALL brackets (including empty) so gaps are visible.
+  // For categorical factors: only show brackets that actually have data (auto-expand).
+  const isNumeric = brackets.length > 0 && brackets[0]._numericPlaceholder;
+  const displayBrackets = isNumeric
+    ? brackets  // always show all defined numeric ranges
+    : brackets.filter(b => b.rows.length > 0);  // categorical: only what exists
+
+  if (!displayBrackets.length) {
+    return '<div style="color:var(--muted2);font-size:11px;padding:6px 0">No data for this factor.</div>';
+  }
+
+  const statsArr = displayBrackets.map(b => computeBracketStats(b.rows));
   const totalN = allFilteredRows.length;
 
-  // collect pcts per threshold column for heat coloring
+  // Heat coloring uses only non-empty brackets so zeros don't drag everything down
   const colPcts = {};
   THRESHOLDS.forEach(t => {
-    colPcts[t.key] = statsArr.map(s => s.n ? (s[t.key]/s.n)*100 : 0);
+    colPcts[t.key] = statsArr.filter(s => s.n > 0).map(s => (s[t.key]/s.n)*100);
   });
 
   let html = '<div class="ftbl-wrap"><table class="ftbl"><thead><tr>';
@@ -646,22 +661,33 @@ function renderFactor(factor, allFilteredRows) {
   THRESHOLDS.forEach(t => { html += `<th>${t.label}</th>`; });
   html += '</tr></thead><tbody>';
 
-  validBrackets.forEach((b,i) => {
+  displayBrackets.forEach((b, i) => {
     const s = statsArr[i];
+    const isEmpty = s.n === 0;
+    const rowStyle = isEmpty ? ' style="opacity:.35"' : '';
+
     const setPct = totalN ? ((s.n/totalN)*100).toFixed(1) : '0.0';
     const avgStr = s.avg !== null ? (s.avg >= 0 ? '+' : '') + s.avg.toFixed(2) : '—';
-    const avgColor = s.avg === null ? 'var(--muted2)' : s.avg >= 2 ? 'var(--green)' : s.avg >= 1 ? 'var(--teal)' : s.avg < 0 ? 'var(--red)' : 'var(--amber)';
+    const avgColor = isEmpty || s.avg === null ? 'var(--muted2)'
+                   : s.avg >= 2 ? 'var(--green)'
+                   : s.avg >= 1 ? 'var(--teal)'
+                   : s.avg < 0  ? 'var(--red)'
+                   : 'var(--amber)';
 
-    html += '<tr>';
-    html += `<td>${esc(b.label)}</td>`;
-    html += `<td class="n-col">${s.n}</td>`;
-    html += `<td class="pct-col">${setPct}%</td>`;
-    html += `<td style="color:${avgColor};font-weight:700">${avgStr}</td>`;
+    html += `<tr${rowStyle}>`;
+    html += `<td>${esc(b.label)}${isEmpty ? ' <span style="font-size:9px;color:var(--muted2)">(no data yet)</span>' : ''}</td>`;
+    html += `<td class="n-col">${isEmpty ? '—' : s.n}</td>`;
+    html += `<td class="pct-col">${isEmpty ? '—' : setPct + '%'}</td>`;
+    html += `<td style="color:${avgColor};font-weight:700">${isEmpty ? '—' : avgStr}</td>`;
 
     THRESHOLDS.forEach(t => {
-      const pct = s.n ? (s[t.key]/s.n)*100 : 0;
-      const hc  = heatClass(pct, colPcts[t.key]);
-      html += `<td class="${hc}"><div class="cell-dual"><div class="cell-n">${s[t.key]}</div><div class="cell-pct">${pct.toFixed(0)}%</div></div></td>`;
+      if (isEmpty) {
+        html += '<td style="color:var(--muted2)">—</td>';
+      } else {
+        const pct = (s[t.key]/s.n)*100;
+        const hc  = heatClass(pct, colPcts[t.key]);
+        html += `<td class="${hc}"><div class="cell-dual"><div class="cell-n">${s[t.key]}</div><div class="cell-pct">${pct.toFixed(0)}%</div></div></td>`;
+      }
     });
     html += '</tr>';
   });
