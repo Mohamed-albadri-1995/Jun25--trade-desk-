@@ -373,6 +373,15 @@
     .jnl-dash-tab { min-height:36px; padding:6px 10px; font-size:10px; }
     .jnl-cal-cell { min-height:34px; font-size:9px; }
   }
+
+  /* ── Analysis tab sub-tabs ── */
+  .analysis-subtabbar{display:flex;gap:2px;padding:8px 10px 0;background:var(--panel2);border-bottom:1px solid var(--border);position:sticky;top:41px;z-index:4;}
+  .atab{padding:8px 16px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--muted);font-weight:700;font-size:12px;cursor:pointer;border-radius:5px 5px 0 0;}
+  .atab.active{color:#93c5fd;border-bottom-color:#3b82f6;background:rgba(59,130,246,0.06);}
+  .atab-pane{display:none;}
+  .atab-pane.active{display:block;}
+  #atab-factor{padding:0;}
+  #atab-factor iframe{width:100%;height:calc(100vh - 90px);border:none;display:block;}
 </style>
 </head>
 <body>
@@ -383,7 +392,7 @@
     <button class="tab" data-pane="pane-screener">🔎 Screener</button>
     <button class="tab" data-pane="pane-registry">📋 Registry</button>
     <button class="tab" data-pane="pane-shortlist">⭐ Shortlist</button>
-    <button class="tab" data-pane="pane-journal">📒 Journal</button>
+    <button class="tab" data-pane="pane-analysis">📊 Analysis</button>
     <button class="tab" data-pane="pane-settings">⚙ Settings</button>
   </div>
 
@@ -458,8 +467,18 @@
     <div id="slList"></div>
   </div>
 
-  <!-- ════════════════════ JOURNAL ════════════════════ -->
-  <div id="pane-journal" class="pane">
+  <!-- ════════════════════ ANALYSIS ════════════════════ -->
+  <div id="pane-analysis" class="pane">
+
+    <!-- Analysis sub-tab bar -->
+    <div class="analysis-subtabbar">
+      <button class="atab active" data-atab="atab-journal">📒 Journal</button>
+      <button class="atab" data-atab="atab-factor">📊 Factor Analysis</button>
+    </div>
+
+    <!-- Journal sub-tab -->
+    <div id="atab-journal" class="atab-pane active">
+    <div class="jnl-root" style="padding:0">
     <div class="jnl-root">
       <div id="tab-journal" class="tab-panel" style="display:block">
         <div class="header">
@@ -626,7 +645,14 @@
 
       </div><!-- /tab-journal -->
     </div><!-- /jnl-root -->
-  </div><!-- /pane-journal -->
+    </div><!-- /atab-journal -->
+
+    <!-- Factor Analysis sub-tab -->
+    <div id="atab-factor" class="atab-pane">
+      <iframe id="factorFrame" src="factor-analysis.html" title="Factor Analysis"></iframe>
+    </div>
+
+  </div><!-- /pane-analysis -->
 
   <!-- ════════════════════ SETTINGS ════════════════════ -->
   <div id="pane-settings" class="pane">

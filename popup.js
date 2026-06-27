@@ -1828,7 +1828,19 @@ function initTabs() {
       t.classList.add('active');
       var pane = t.getAttribute('data-pane');
       $(pane).classList.add('active');
-      if (pane === 'pane-registry') renderRegistryTable(); // always show the latest records
+      if (pane === 'pane-registry') renderRegistryTable();
+    });
+  });
+
+  // Analysis tab: sub-tab switching (Journal ↔ Factor Analysis)
+  Array.prototype.forEach.call(document.querySelectorAll('.atab'), function (t) {
+    t.addEventListener('click', function () {
+      document.querySelectorAll('.atab').forEach(function (x) { x.classList.remove('active'); });
+      document.querySelectorAll('.atab-pane').forEach(function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      var target = t.getAttribute('data-atab');
+      var el = document.getElementById(target);
+      if (el) el.classList.add('active');
     });
   });
 }

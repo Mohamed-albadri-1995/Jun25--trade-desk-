@@ -222,10 +222,24 @@ table.btbl td:first-child{text-align:left;color:var(--txt2)}
 </div>
 
 <!-- Upload zone (shown until file loaded) -->
-<div id="uploadZone" class="upload-zone" onclick="document.getElementById('fileInput').click()">
+<div id="uploadZone" class="upload-zone">
   <div style="font-size:28px">📂</div>
-  <strong>Drop merged register CSV here or click to browse</strong>
-  <p>Expects the merged register export from Trade Desk</p>
+  <strong>Load merged register data</strong>
+  <p style="margin-bottom:12px">Drop a merged register CSV here, click to browse, or load directly from the extension registry.</p>
+  <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap" onclick="event.stopPropagation()">
+    <button onclick="document.getElementById('fileInput').click()"
+      style="padding:9px 18px;border-radius:7px;border:1px solid var(--border2);background:var(--inset);color:var(--txt2);font-size:12px;font-weight:700;cursor:pointer">
+      📁 Browse CSV file
+    </button>
+    <button id="regLoadBtn" onclick="loadFromRegistry()"
+      style="padding:9px 18px;border-radius:7px;border:1px solid rgba(94,234,212,.4);background:rgba(94,234,212,.08);color:var(--teal);font-size:12px;font-weight:700;cursor:pointer;display:none">
+      🔗 Load from Extension Registry
+    </button>
+  </div>
+  <p id="regLoadNote" style="font-size:10px;color:var(--muted2);margin-top:8px;display:none">
+    Loads all registry records from the extension's storage — no file needed.<br>
+    <em>Note: outcome columns (entry35/up_r35 etc.) require a merged CSV with EOD data.</em>
+  </p>
   <input type="file" id="fileInput" accept=".csv">
 </div>
 
@@ -1445,6 +1459,134 @@ function csvCell(v) {
   return s.includes(',') || s.includes('"') || s.includes('\n')
     ? '"' + s.replace(/"/g, '""') + '"'
     : s;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXTENSION REGISTRY INTEGRATION
+// When running inside the Trade Desk extension, offer direct load
+// from chrome.storage.local without needing a CSV file upload.
+// ══════════════════════════════════════════════════════════════════
+(function detectExtension() {
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    const btn  = document.getElementById('regLoadBtn');
+    const note = document.getElementById('regLoadNote');
+    if (btn)  btn.style.display  = 'inline-block';
+    if (note) note.style.display = 'block';
+  }
+})();
+
+function loadFromRegistry() {
+  if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+    showErr('Extension storage not available — load a CSV file instead.');
+    return;
+  }
+  chrome.storage.local.get(['registry'], function(result) {
+    const reg = result.registry || {};
+    const rows = Object.values(reg);
+    if (!rows.length) {
+      showErr('Registry is empty — run a scan from the Screener tab first.');
+      return;
+    }
+    const mapped = rows.map(registryRowToAnalysisRow);
+    loadData(mapped);
+  });
+}
+
+// Transform a registry row (popup.js format) into a flat analysis row.
+function registryRowToAnalysisRow(r) {
+  const s   = r.stock   || {};
+  const ctx = r.context || {};
+  const keys = (r.screenerKeys || []).join(' / ');
+
+  // snap context: use the stored context for both 9:35 and 9:40 columns
+  // (registry captures a single snapshot; slot-specific snapshots require the merged CSV)
+  const regime  = ctx.regime || ctx.marketBias || '';
+  const lt      = ctx.ltBias  || '';
+  const mt      = ctx.mtBias  || ctx.midTerm || '';
+  const st      = ctx.stBias  || '';
+  const secBias = ctx.secBias || '';
+
+  return {
+    date:        r.date        || '',
+    slot:        r.slot        || '',
+    captured_at: r.firstSeen   ? new Date(r.firstSeen).toISOString() : '',
+    complete:    '',
+    reason:      '',
+    ticker:      r.ticker      || '',
+    tv_symbol:   r.tvSymbol    || '',
+    screeners:   keys,
+    price:       s.price       != null ? String(s.price)       : '',
+    open:        s.open        != null ? String(s.open)        : '',
+    change_pct:  s.change      != null ? String(s.change)      : '',
+    prev_close:  s.prevClose   != null ? String(s.prevClose)   : '',
+    gap_pct:     s.gapPct      != null ? String(s.gapPct)      : '',
+    vwap:        s.vwap        != null ? String(s.vwap)        : '',
+    ema9:        s.ema9        != null ? String(s.ema9)        : '',
+    ema13:       s.ema13       != null ? String(s.ema13)       : '',
+    ema20:       s.ema20       != null ? String(s.ema20)       : '',
+    ema50:       s.ema50       != null ? String(s.ema50)       : '',
+    sma5:        s.sma5        != null ? String(s.sma5)        : '',
+    month_high:  s.monthHigh   != null ? String(s.monthHigh)   : '',
+    month_low:   s.monthLow    != null ? String(s.monthLow)    : '',
+    day_high:    s.dayHigh     != null ? String(s.dayHigh)     : '',
+    day_low:     s.dayLow      != null ? String(s.dayLow)      : '',
+    atr:         s.atr         != null ? String(s.atr)         : '',
+    pm_high:     s.pmHigh      != null ? String(s.pmHigh)      : '',
+    pm_low:      s.pmLow       != null ? String(s.pmLow)       : '',
+    pm_range:    s.pmRange     != null ? String(s.pmRange)     : '',
+    adr_pct:     s.adrPct      != null ? String(s.adrPct)      : '',
+    month_range_pos: s.monthRangePos != null ? String(s.monthRangePos) : '',
+    pm_adr_ratio:    s.pmAdrRatio   != null ? String(s.pmAdrRatio)   : '',
+    mcap:        s.mcap        != null ? String(s.mcap)        : '',
+    float_shares: s.floatShares != null ? String(s.floatShares) : '',
+    short_float: s.shortFloat  != null ? String(s.shortFloat)  : '',
+    rvol:        s.rvol        != null ? String(s.rvol)        : '',
+    sector:      s.sector      || '',
+    industry:    s.industry    || '',
+    st_bias:     st,
+    lt_bias:     lt,
+    lt_label:    lt,
+    mid_term:    mt,
+    mid_term_label: mt,
+    sec_bias:    secBias,
+    sec_score:   ctx.secScore  != null ? String(ctx.secScore)  : '',
+    sec_hot:     ctx.secHot    ? 'true' : 'false',
+    market_bias: ctx.marketBias || '',
+    // Outcome columns — not stored in live registry; require merged CSV with EOD data
+    entry35: '', hh35: '', ll35: '', down_r35: '', up_r35: '',
+    entry40: '', hh40: '', ll40: '', down_r40: '', up_r40: '',
+    eod_atr: '', eod_atr_source: '', last_bar: '', fetched_at: '', eod_status: '',
+    // Snapshot columns — same context used for both slots (registry has one snapshot)
+    snap935_lt: lt,  snap935_mt: mt,  snap935_st: st,  snap935_regime: regime,  snap935_sec_bias: secBias,
+    snap940_lt: lt,  snap940_mt: mt,  snap940_st: st,  snap940_regime: regime,  snap940_sec_bias: secBias,
+  };
+}
+
+// loadData accepts either a CSV text string OR a pre-built array of row objects.
+const _origLoadData = loadData;
+// Override to accept objects array directly (from registry)
+function loadData(input) {
+  try {
+    let rows;
+    if (typeof input === 'string') {
+      rows = parseCSV(input);
+    } else if (Array.isArray(input)) {
+      rows = input;
+    } else {
+      showErr('Unknown data format.'); return;
+    }
+    if (!rows.length) { showErr('No records found.'); return; }
+    clearErr();
+    allRows = rows;
+    document.getElementById('uploadZone').style.display = 'none';
+    document.getElementById('controlsBar').style.display = 'flex';
+    document.getElementById('summaryBar').style.display = 'flex';
+    document.getElementById('runBtn').disabled = false;
+    buildRegimeChecks();
+    runAnalysis();
+  } catch(e) {
+    showErr('Failed to load data: ' + e.message);
+  }
 }
 </script>
 </body>
