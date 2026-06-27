@@ -181,6 +181,17 @@ table.ftbl tr:hover td{background:rgba(148,163,184,.05)}
   <div style="margin-left:auto;font-size:10px;color:var(--muted2)" id="sOutputMode"></div>
 </div>
 
+<!-- Active columns confirmation strip -->
+<div id="colStrip" style="display:none;padding:7px 20px;background:#0a1628;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);gap:18px;flex-wrap:wrap;align-items:center">
+  <span style="font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;font-size:9px">Active columns →</span>
+  <span>Slot filter: <strong id="colSlot" style="color:var(--teal)">—</strong></span>
+  <span>Entry: <code id="colEntry" style="color:var(--amber);background:rgba(251,191,36,.08);padding:1px 5px;border-radius:3px">—</code></span>
+  <span>High: <code id="colHH" style="color:var(--amber);background:rgba(251,191,36,.08);padding:1px 5px;border-radius:3px">—</code></span>
+  <span>Low: <code id="colLL" style="color:var(--amber);background:rgba(251,191,36,.08);padding:1px 5px;border-radius:3px">—</code></span>
+  <span>Output: <code id="colOut" style="color:var(--green);background:rgba(34,197,94,.08);padding:1px 5px;border-radius:3px">—</code></span>
+  <span>Regime/context from: <code id="colSnap" style="color:var(--blue);background:rgba(96,165,250,.08);padding:1px 5px;border-radius:3px">—</code></span>
+</div>
+
 <div id="errBar"></div>
 <div id="content"><div class="empty-msg">Load a merged register CSV to begin analysis.</div></div>
 
@@ -387,6 +398,33 @@ function runAnalysis() {
   document.getElementById('sFinal').textContent  = final.length;
   const modeLabel = selectedMode === 'up' ? '↑ Up R (H−E/ATR)' : selectedMode === 'down' ? '↓ Down R (E−L/ATR)' : '⬆⬇ Max R';
   document.getElementById('sOutputMode').textContent = 'Mode: ' + modeLabel + ' · Noise cut: ±' + noisePct + '%';
+
+  // Update active-columns confirmation strip
+  const strip = document.getElementById('colStrip');
+  strip.style.display = 'flex';
+  if (selectedSlot === 'both') {
+    document.getElementById('colSlot').textContent  = 'Both (each row uses its own slot)';
+    document.getElementById('colEntry').textContent = 'entry35 or entry40';
+    document.getElementById('colHH').textContent    = 'hh35 or hh40';
+    document.getElementById('colLL').textContent    = 'll35 or ll40';
+    document.getElementById('colOut').textContent   =
+      selectedMode === 'up'   ? 'up_r35 / up_r40'
+    : selectedMode === 'down' ? 'down_r35 / down_r40'
+    : 'max(up_r35,down_r35) / max(up_r40,down_r40)';
+    document.getElementById('colSnap').textContent = 'snap935_* or snap940_*';
+  } else {
+    const sfx  = selectedSlot === '09:35' ? '35'      : '40';
+    const snap = selectedSlot === '09:35' ? 'snap935' : 'snap940';
+    document.getElementById('colSlot').textContent  = selectedSlot + ' only (excludes ' + (sfx==='35'?'09:40':'09:35') + ' rows)';
+    document.getElementById('colEntry').textContent = 'entry' + sfx;
+    document.getElementById('colHH').textContent    = 'hh' + sfx;
+    document.getElementById('colLL').textContent    = 'll' + sfx;
+    document.getElementById('colOut').textContent   =
+      selectedMode === 'up'   ? 'up_r'   + sfx
+    : selectedMode === 'down' ? 'down_r' + sfx
+    : 'max(up_r' + sfx + ', down_r' + sfx + ')';
+    document.getElementById('colSnap').textContent = snap + '_*';
+  }
 
   // Render
   renderAllFactors(final);
